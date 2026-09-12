@@ -12,7 +12,10 @@ import firebaseConfig from '../../firebase-applet-config.json';
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
-export const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+export const GOOGLE_CALENDAR_SCOPES = [
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar',
+];
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
@@ -92,7 +95,7 @@ export const googleSignIn = async (
     isSigningIn = true;
     const provider = new GoogleAuthProvider();
     if (includeCalendarScope) {
-      provider.addScope(GOOGLE_CALENDAR_SCOPE);
+      GOOGLE_CALENDAR_SCOPES.forEach((scope) => provider.addScope(scope));
     }
     provider.setCustomParameters({
       prompt: 'select_account',
@@ -100,19 +103,32 @@ export const googleSignIn = async (
 
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
-    const token = credential?.accessToken || null;
+    const rawToken = credential?.accessToken || null;
 
-    if (token) {
-      setAccessToken(token);
+    // Only store and return access token as calendar token if calendar scope was requested
+    const calendarToken = includeCalendarScope ? rawToken : null;
+    if (calendarToken) {
+      setAccessToken(calendarToken);
+    } else {
+      setAccessToken(null);
     }
 
     return {
       user: result.user,
-      accessToken: token,
-      hasCalendarAccess: Boolean(token),
+      accessToken: calendarToken,
+      hasCalendarAccess: Boolean(calendarToken),
     };
   } catch (error: any) {
-    console.error('Sign-in error:', error);
+    if (
+      error?.code === 'auth/popup-closed-by-user' ||
+      error?.code === 'auth/cancelled-popup-request'
+    ) {
+      console.info('Google sign-in popup closed by user.');
+    } else if (error?.code === 'auth/popup-blocked') {
+      console.warn('Google sign-in popup blocked by browser.');
+    } else {
+      console.error('Sign-in error:', error);
+    }
     throw error;
   } finally {
     isSigningIn = false;

@@ -1,5 +1,13 @@
 import { CalendarEvent, TimeSlot } from '../types';
 
+export class InsufficientScopeError extends Error {
+  code = 'INSUFFICIENT_SCOPE';
+  constructor(message: string) {
+    super(message);
+    this.name = 'InsufficientScopeError';
+  }
+}
+
 export function categorizeTimeToSlot(timeStr: string): TimeSlot {
   // timeStr is expected in HH:mm
   if (!timeStr) return 'morning';
@@ -60,6 +68,9 @@ export async function fetchGoogleCalendarEvents(
 
   if (!response.ok) {
     const errText = await response.text();
+    if (response.status === 401 || response.status === 403) {
+      throw new InsufficientScopeError(`Insufficient Google Calendar scopes (${response.status}): ${errText}`);
+    }
     throw new Error(`Google Calendar error (${response.status}): ${errText}`);
   }
 
@@ -129,6 +140,9 @@ export async function createGoogleCalendarEvent(
 
   if (!response.ok) {
     const errText = await response.text();
+    if (response.status === 401 || response.status === 403) {
+      throw new InsufficientScopeError(`Insufficient Google Calendar scopes (${response.status}): ${errText}`);
+    }
     throw new Error(`Failed to create Google Calendar event: ${errText}`);
   }
 
@@ -152,6 +166,9 @@ export async function deleteGoogleCalendarEvent(
 
   if (!response.ok && response.status !== 404) {
     const errText = await response.text();
+    if (response.status === 401 || response.status === 403) {
+      throw new InsufficientScopeError(`Insufficient Google Calendar scopes (${response.status}): ${errText}`);
+    }
     throw new Error(`Failed to delete Google Calendar event: ${errText}`);
   }
 }
@@ -201,6 +218,9 @@ export async function updateGoogleCalendarEvent(
 
   if (!response.ok && response.status !== 404) {
     const errText = await response.text();
+    if (response.status === 401 || response.status === 403) {
+      throw new InsufficientScopeError(`Insufficient Google Calendar scopes (${response.status}): ${errText}`);
+    }
     throw new Error(`Failed to update Google Calendar event: ${errText}`);
   }
 }

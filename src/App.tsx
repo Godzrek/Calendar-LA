@@ -22,6 +22,7 @@ import {
   createGoogleCalendarEvent,
   updateGoogleCalendarEvent,
   deleteGoogleCalendarEvent,
+  InsufficientScopeError,
 } from './services/calendarApi';
 import {
   checkIsViewOnlyFromUrl,
@@ -472,10 +473,9 @@ export default function App() {
 
   // Sync with Google Calendar
   const syncGoogleCalendar = useCallback(async () => {
-    const accessToken = token || (await getAccessToken());
+    const accessToken = token || getAccessToken();
     if (!accessToken) {
-      // Prompt user to connect Google Calendar
-      handleGoogleLogin();
+      showToast('ยังไม่ได้เชื่อมต่อ Google Calendar');
       return;
     }
 
@@ -496,10 +496,20 @@ export default function App() {
       setGcalConnected(true);
       showToast(`รีเฟรช Google Calendar สำเร็จ (พบนัดหมาย ${gEvents.length} รายการ)`);
     } catch (err: any) {
-      console.error('Failed to sync Google Calendar:', err);
-      showToast('ไม่สามารถดึงข้อมูลจาก Google Calendar ได้ กำลังขอเชื่อมต่อใหม่...');
-      // Re-trigger sign in
-      handleGoogleLogin();
+      console.warn('Google Calendar sync notice:', err);
+      if (
+        err instanceof InsufficientScopeError ||
+        err?.message?.includes('insufficient') ||
+        err?.message?.includes('403') ||
+        err?.message?.includes('401')
+      ) {
+        setToken(null);
+        setGcalConnected(false);
+        setAccessToken(null);
+        showToast('สิทธิ์ Google Calendar ไม่เพียงพอหรือหมดอายุ โปรดเข้าสู่ระบบใหม่');
+      } else {
+        showToast('ไม่สามารถดึงข้อมูลจาก Google Calendar ได้');
+      }
     } finally {
       setIsSyncingGCal(false);
     }
@@ -514,7 +524,7 @@ export default function App() {
         setUser(res.user);
         setIsFirestoreConnected(true);
 
-        if (res.accessToken) {
+        if (res.hasCalendarAccess && res.accessToken) {
           setToken(res.accessToken);
           setGcalConnected(true);
           showToast(`เข้าสู่ระบบ Google สำเร็จ: ${res.user.displayName || res.user.email}`);
@@ -534,8 +544,18 @@ export default function App() {
               });
               showToast(`เชื่อมต่อ Google Calendar สำเร็จ (นำเข้า ${gEvents.length} นัดหมาย)`);
             }
-          } catch (gcalErr) {
-            console.warn('Initial Google Calendar fetch:', gcalErr);
+          } catch (gcalErr: any) {
+            console.warn('Initial Google Calendar fetch notice:', gcalErr);
+            if (
+              gcalErr instanceof InsufficientScopeError ||
+              gcalErr?.message?.includes('insufficient') ||
+              gcalErr?.message?.includes('403')
+            ) {
+              setToken(null);
+              setGcalConnected(false);
+              setAccessToken(null);
+              showToast('เข้าสู่ระบบสำเร็จ (แต่ยังไม่ได้รับสิทธิ์ Google Calendar)');
+            }
           }
         } else {
           setToken(null);
@@ -548,12 +568,24 @@ export default function App() {
         setAuthErrorInfo(null);
       }
     } catch (err: any) {
-      console.error('Login error:', err);
+      if (
+        err?.code === 'auth/popup-closed-by-user' ||
+        err?.code === 'auth/cancelled-popup-request'
+      ) {
+        console.info('Login notice: popup closed by user');
+      } else if (err?.code === 'auth/popup-blocked') {
+        console.warn('Login notice: popup blocked by browser');
+      } else {
+        console.error('Login error:', err);
+      }
+
       const parsed = parseFirebaseAuthError(err);
       setAuthErrorInfo(parsed);
       setAuthErrorModalOpen(true);
       if (parsed.code === 'auth/popup-closed-by-user' || parsed.code === 'auth/cancelled-popup-request') {
         showToast('หน้าต่างเข้าสู่ระบบถูกปิด โปรดลองใหม่อีกครั้ง');
+      } else if (parsed.code === 'auth/popup-blocked') {
+        showToast('เบราว์เซอร์บล็อกหน้าต่างเข้าสู่ระบบ โปรดอนุญาตป๊อปอัปหรือเปิดในแท็บใหม่');
       } else {
         showToast(`เข้าสู่ระบบไม่สำเร็จ: ${parsed.title}`);
       }
@@ -665,8 +697,21 @@ export default function App() {
           });
         }
       } catch (err: any) {
-        console.error('Failed to update in Google Calendar:', err);
-        showToast('อัปเดตในระบบแล้ว แต่ซิงค์ Google Calendar ไม่สำเร็จ');
+        if (
+          err instanceof InsufficientScopeError ||
+          err?.message?.includes('insufficient') ||
+          err?.message?.includes('403') ||
+          err?.message?.includes('401')
+        ) {
+          console.warn('Google Calendar scope insufficient during update:', err);
+          setToken(null);
+          setGcalConnected(false);
+          setAccessToken(null);
+          showToast('อัปเดตในแอพแล้ว (สิทธิ์ Google Calendar ไม่เพียงพอ โปรดเชื่อมต่อใหม่)');
+        } else {
+          console.error('Failed to update in Google Calendar:', err);
+          showToast('อัปเดตในระบบแล้ว แต่ซิงค์ Google Calendar ไม่สำเร็จ');
+        }
       }
     }
 
@@ -709,8 +754,21 @@ export default function App() {
           endTime: eventData.endTime,
         });
       } catch (err: any) {
-        console.error('Failed to create in Google Calendar:', err);
-        showToast('บันทึกในแอพแล้ว แต่ซิงค์ Google Calendar ไม่สำเร็จ');
+        if (
+          err instanceof InsufficientScopeError ||
+          err?.message?.includes('insufficient') ||
+          err?.message?.includes('403') ||
+          err?.message?.includes('401')
+        ) {
+          console.warn('Google Calendar scope insufficient during create:', err);
+          setToken(null);
+          setGcalConnected(false);
+          setAccessToken(null);
+          showToast('บันทึกในแอพแล้ว (สิทธิ์ Google Calendar ไม่เพียงพอ โปรดเชื่อมต่อใหม่)');
+        } else {
+          console.error('Failed to create in Google Calendar:', err);
+          showToast('บันทึกในแอพแล้ว แต่ซิงค์ Google Calendar ไม่สำเร็จ');
+        }
       }
     }
 
@@ -744,8 +802,20 @@ export default function App() {
     if (event.isGoogleEvent && event.googleEventId && token) {
       try {
         await deleteGoogleCalendarEvent(token, event.googleEventId);
-      } catch (err) {
-        console.error('Failed to delete from Google Calendar:', err);
+      } catch (err: any) {
+        if (
+          err instanceof InsufficientScopeError ||
+          err?.message?.includes('insufficient') ||
+          err?.message?.includes('403') ||
+          err?.message?.includes('401')
+        ) {
+          console.warn('Google Calendar scope insufficient during delete:', err);
+          setToken(null);
+          setGcalConnected(false);
+          setAccessToken(null);
+        } else {
+          console.error('Failed to delete from Google Calendar:', err);
+        }
       }
     }
 
