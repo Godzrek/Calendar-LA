@@ -1,12 +1,12 @@
 {
-  "projectId": "gen-lang-client-0898559993",
-  "appId": "1:857972632:web:82abe0842efaee1e2155ed",
-  "apiKey": "AIzaSyBEY64xMOGz_oP-fNwtziVeHpOldnZkxzY",
-  "authDomain": "gen-lang-client-0898559993.firebaseapp.com",
-  "firestoreDatabaseId": "calendar-la",
-  "storageBucket": "gen-lang-client-0898559993.firebasestorage.app",
-  "messagingSenderId": "857972632",
-  "measurementId": "",
-  "oAuthClientId": "857972632-2m8flq44qida9gilgutb9n6pm8q5ks4l.apps.googleusercontent.com",
+  "projectId": "calendar-la-19279",
+  "appId": "1:519969095868:web:f9f9d4b24028347fe850b9",
+  "apiKey": "AIzaSyChwvReY0nRJGpq0QqRdonPrBB7JuMKFcw",
+  "authDomain": "calendar-la-19279.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "calendar-la-19279.firebasestorage.app",
+  "messagingSenderId": "519969095868",
+  "measurementId": "G-31VH3S2PTZ",
+  "oAuthClientId": "",
   "recaptchaSiteKey": ""
 }

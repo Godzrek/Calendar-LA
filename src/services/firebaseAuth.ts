@@ -146,6 +146,7 @@ export interface AuthErrorInfo {
   message: string;
   solution: string[];
   currentDomain: string;
+  firebaseProjectId?: string;
   canRetryWithoutCalendar: boolean;
   isIframe: boolean;
 }
@@ -155,6 +156,7 @@ export const parseFirebaseAuthError = (error: any): AuthErrorInfo => {
   const rawMessage: string = error?.message || String(error);
   const currentDomain: string = typeof window !== 'undefined' ? window.location.hostname : '';
   const isIframe: boolean = typeof window !== 'undefined' && window.self !== window.top;
+  const firebaseProjectId: string = firebaseConfig?.projectId || '';
 
   if (code === 'auth/unauthorized-domain') {
     return {
@@ -163,12 +165,14 @@ export const parseFirebaseAuthError = (error: any): AuthErrorInfo => {
       message: `Firebase ไม่อนุญาตให้ล็อกอินจากโดเมนนี้: ${currentDomain}`,
       solution: [
         `1. ไปที่ Firebase Console (https://console.firebase.google.com)`,
-        `2. เลือกโปรเจกต์ของคุณ -> เมนู Authentication -> แท็บ Settings -> หัวข้อ Authorized domains`,
-        `3. กดปุ่ม "Add domain" แล้ววางชื่อโดเมน: ${currentDomain}`,
-        `4. ตรวจสอบว่าไม่มี "https://" หรือเครื่องหมาย "/" ด้านท้ายชื่อโดเมน`,
-        `5. กด Save แล้วรอประมาณ 10-20 วินาที จากนั้นลองกดล็อกอินอีกครั้ง`,
+        `2. สำคัญมาก: เลือกโปรเจกต์ "${firebaseProjectId}" (โปรดตรวจดูชื่อโปรเจกต์ที่มุมซ้ายบนของ Firebase Console ว่าตรงกัน)`,
+        `3. ไปที่เมนู Authentication -> แท็บ Settings -> หัวข้อ Authorized domains`,
+        `4. กดปุ่ม "Add domain" แล้ววางชื่อโดเมน: ${currentDomain}`,
+        `5. ตรวจสอบว่าไม่มี "https://" หรือเครื่องหมาย "/" ด้านท้ายชื่อโดเมน`,
+        `6. กด Save แล้วรอประมาณ 10-20 วินาที จากนั้นลองกดล็อกอินอีกครั้ง`,
       ],
       currentDomain,
+      firebaseProjectId,
       canRetryWithoutCalendar: false,
       isIframe,
     };

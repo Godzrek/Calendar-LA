@@ -1,6 +1,7 @@
 import React from 'react';
 import { CalendarEvent, StickerPlacement, ThemeConfig, TimeSlot } from '../types';
 import { filterEventsBySlot } from '../utils/dateUtils';
+import { getDaySpecialInfo } from '../utils/thaiHolidays';
 import { Sparkles, Clock } from 'lucide-react';
 
 interface SlotDayCellProps {
@@ -65,21 +66,34 @@ export const SlotDayCell: React.FC<SlotDayCellProps> = ({
     },
   ];
 
+  const specialInfo = getDaySpecialInfo(dateKey);
+  const isHoliday = specialInfo.isHoliday && isCurrentMonth;
+  const isWanPhra = specialInfo.isWanPhra && isCurrentMonth;
+
   return (
     <div
       id={`day-cell-${dateKey}`}
       onClick={() => onDaySelect?.(dateKey)}
+      title={specialInfo.holidayName || specialInfo.wanPhraDescription || undefined}
       className={`group relative flex flex-col rounded-xl border p-1 sm:p-1.5 transition-all duration-150 min-h-[96px] sm:min-h-[135px] cursor-pointer ${
-        theme.cardBg
+        !isCurrentMonth
+          ? 'opacity-35 bg-stone-50/40'
+          : isHoliday
+          ? theme.isDark
+            ? 'bg-stone-900 border-stone-700 shadow-xs'
+            : 'bg-stone-200/90 border-stone-300 shadow-2xs'
+          : theme.cardBg
       } ${
         isSelected
           ? 'ring-2 ring-amber-500 shadow-xs border-amber-400'
           : isToday
           ? 'ring-1.5 ring-amber-500 shadow-xs'
+          : isHoliday
+          ? 'border-stone-300/90'
           : theme.cardBorder
-      } ${!isCurrentMonth ? 'opacity-35 bg-stone-50/40' : 'hover:border-stone-400'}`}
+      } ${!isCurrentMonth ? '' : 'hover:border-stone-400'}`}
     >
-      {/* Top Header: Day Number & Day-level Stickers */}
+      {/* Top Header: Day Number & Day-level Stickers / Indicators */}
       <div className="flex items-center justify-between pb-1 px-0.5">
         <div className="flex items-center gap-1">
           <span
@@ -88,6 +102,8 @@ export const SlotDayCell: React.FC<SlotDayCellProps> = ({
                 ? 'bg-amber-500 text-white font-bold'
                 : isSelected
                 ? 'bg-amber-500 text-white font-bold'
+                : isHoliday
+                ? 'bg-red-500/15 text-red-600 dark:text-red-400 font-bold'
                 : isCurrentMonth
                 ? `${theme.textColor}`
                 : `${theme.mutedText}`
@@ -98,6 +114,22 @@ export const SlotDayCell: React.FC<SlotDayCellProps> = ({
           {isToday && (
             <span className="hidden md:inline-block text-[9px] font-medium text-amber-600">
               วันนี้
+            </span>
+          )}
+          {isHoliday && (
+            <span
+              title={specialInfo.holidayName}
+              className="text-[8px] font-bold px-1 py-0.2 rounded bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300 leading-tight shrink-0 hidden sm:inline-block"
+            >
+              หยุด
+            </span>
+          )}
+          {isWanPhra && (
+            <span
+              title={specialInfo.wanPhraDescription}
+              className="text-[10px] leading-none shrink-0 select-none text-amber-600 dark:text-amber-400"
+            >
+              🪷
             </span>
           )}
         </div>

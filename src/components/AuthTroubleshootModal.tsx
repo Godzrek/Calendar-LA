@@ -119,6 +119,23 @@ export const AuthTroubleshootModal: React.FC<AuthTroubleshootModalProps> = ({
           </p>
         </div>
 
+        {/* Project ID Notice (Crucial for mismatched projects) */}
+        {errorInfo.firebaseProjectId && (
+          <div className="mb-3 p-3 rounded-xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 text-xs text-stone-700 dark:text-stone-300 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-amber-900 dark:text-amber-200">
+                โปรเจกต์ Firebase ของแอปนี้:
+              </span>
+              <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded-md bg-white dark:bg-stone-900 border border-amber-300 dark:border-amber-800 text-amber-950 dark:text-amber-100 select-all">
+                {errorInfo.firebaseProjectId}
+              </span>
+            </div>
+            <p className="text-[10.5px] text-amber-800/90 dark:text-amber-300/90 leading-tight">
+              ⚠️ <strong>ข้อควรระวัง:</strong> โปรดสังเกตชื่อโปรเจกต์ที่มุมซ้ายบนของ Firebase Console จะต้องเป็น <strong>{errorInfo.firebaseProjectId}</strong> (หากเพิ่มในโปรเจกต์อื่น เช่น calendar-la-19279 จะไม่เกิดผล)
+            </p>
+          </div>
+        )}
+
         {/* Current Domain Copy Box (Crucial for Authorized Domains) */}
         {errorInfo.currentDomain && (
           <div className="mb-4 p-3 rounded-xl bg-stone-50 dark:bg-stone-800/80 border border-stone-200 dark:border-stone-700 space-y-1.5">

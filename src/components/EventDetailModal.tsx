@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CalendarEvent, ThemeConfig } from '../types';
 import { formatThaiDate } from '../utils/dateUtils';
+import { getDaySpecialInfo } from '../utils/thaiHolidays';
 import { X, Clock, MapPin, AlignLeft, Trash2, ExternalLink, AlertTriangle, Edit3 } from 'lucide-react';
 
 interface EventDetailModalProps {
@@ -125,6 +126,34 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
               <span>{event.startTime} - {event.endTime} น.</span>
             </div>
           </div>
+
+          {/* Holiday and Wan Phra indicator */}
+          {(() => {
+            const specialInfo = getDaySpecialInfo(event.date);
+            if (!specialInfo.isHoliday && !specialInfo.isWanPhra) return null;
+            return (
+              <div className="space-y-1.5 pt-0.5">
+                {specialInfo.isHoliday && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200/80 dark:border-red-900/60 text-xs text-red-700 dark:text-red-300">
+                    <span>🚩</span>
+                    <span className="font-semibold">วันหยุดราชการ: {specialInfo.holidayName}</span>
+                    {specialInfo.isSubstitution && (
+                      <span className="text-[10px] bg-red-100 dark:bg-red-900/70 text-red-700 dark:text-red-200 px-1.5 py-0.2 rounded font-medium">
+                        (ชดเชย)
+                      </span>
+                    )}
+                  </div>
+                )}
+                {specialInfo.isWanPhra && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/60 text-xs text-amber-800 dark:text-amber-300">
+                    <span>🪷</span>
+                    <span className="font-semibold">{specialInfo.wanPhraDescription}</span>
+                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-normal">(วันธรรมสวนะ)</span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {event.location && (
             <div className="flex items-center gap-2.5 text-stone-600 dark:text-stone-300">

@@ -1,6 +1,7 @@
 import React from 'react';
 import { CalendarEvent, StickerPlacement, ThemeConfig, TimeSlot } from '../types';
 import { formatThaiDate, filterEventsBySlot } from '../utils/dateUtils';
+import { getDaySpecialInfo } from '../utils/thaiHolidays';
 import { Plus, Clock, MapPin, Sparkles, ChevronRight } from 'lucide-react';
 
 interface DayScheduleCardProps {
@@ -52,17 +53,19 @@ export const DayScheduleCard: React.FC<DayScheduleCardProps> = ({
     },
   ];
 
+  const specialInfo = getDaySpecialInfo(dateKey);
+
   return (
     <div
       id="mobile-day-schedule"
-      className="mt-3 rounded-2xl border border-stone-200/80 bg-white p-3.5 sm:p-4 shadow-xs"
+      className="mt-3 rounded-2xl border border-stone-200/80 bg-white dark:bg-stone-900 p-3.5 sm:p-4 shadow-xs"
     >
       {/* Date Header */}
-      <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-stone-100">
+      <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-stone-100 dark:border-stone-800">
         <div className="flex items-center gap-2">
           <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
           <div>
-            <h3 className="text-sm sm:text-base font-bold text-stone-900 leading-tight">
+            <h3 className="text-sm sm:text-base font-bold text-stone-900 dark:text-stone-100 leading-tight">
               ตารางนัดหมาย: {formatThaiDate(dateKey)}
             </h3>
             <p className="text-[11px] text-stone-400">
@@ -81,7 +84,7 @@ export const DayScheduleCard: React.FC<DayScheduleCardProps> = ({
             <button
               type="button"
               onClick={() => onOpenStickers(dateKey)}
-              className="px-2 py-1 rounded-lg text-xs font-medium bg-stone-100 hover:bg-stone-200 text-stone-700 flex items-center gap-1 transition-colors"
+              className="px-2 py-1 rounded-lg text-xs font-medium bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 flex items-center gap-1 transition-colors"
             >
               <Sparkles className="w-3 h-3 text-amber-500" />
               <span>แปะสติ๊กเกอร์</span>
@@ -89,6 +92,42 @@ export const DayScheduleCard: React.FC<DayScheduleCardProps> = ({
           )}
         </div>
       </div>
+
+      {/* Holiday & Wan Phra Information Banner (Shown when viewing details) */}
+      {(specialInfo.isHoliday || specialInfo.isWanPhra) && (
+        <div className="mb-3 space-y-1.5 animate-in fade-in duration-150">
+          {specialInfo.isHoliday && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200/80 dark:border-red-900/60 text-red-800 dark:text-red-200">
+              <span className="text-base leading-none">🚩</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs font-bold text-red-700 dark:text-red-300">
+                    วันหยุดราชการ: {specialInfo.holidayName}
+                  </span>
+                  {specialInfo.isSubstitution && (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-red-100 dark:bg-red-900/70 text-red-700 dark:text-red-200 font-medium">
+                      วันหยุดชดเชย
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          {specialInfo.isWanPhra && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/60 text-amber-900 dark:text-amber-200">
+              <span className="text-base leading-none">🪷</span>
+              <div className="min-w-0 flex-1">
+                <span className="text-xs font-bold text-amber-800 dark:text-amber-300">
+                  {specialInfo.wanPhraDescription}
+                </span>
+                <span className="text-[11px] text-amber-600 dark:text-amber-400 ml-1.5">
+                  (วันธรรมสวนะ)
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 3 Slots: Morning, Afternoon, Evening (Vertical layout, Pastel Colors, No black) */}
       <div className="space-y-2.5">

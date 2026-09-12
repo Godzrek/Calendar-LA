@@ -71,11 +71,15 @@ import {
   Users,
   Sparkles,
   UserCheck,
+  Edit3,
+  Check,
+  X,
 } from 'lucide-react';
 
 const STORAGE_EVENTS_KEY = 'slot_calendar_events_v2';
 const STORAGE_STICKERS_KEY = 'slot_calendar_stickers_v2';
 const STORAGE_THEME_KEY = 'slot_calendar_theme_id_v2';
+const STORAGE_OWNER_NAME_KEY = 'slot_calendar_owner_name_v2';
 
 export default function App() {
   // Navigation Date
@@ -99,6 +103,11 @@ export default function App() {
   // View-Only Share Mode (Friends can view but CANNOT edit)
   const [isViewOnly, setIsViewOnly] = useState(false);
   const [sharedOwnerName, setSharedOwnerName] = useState<string>('เพื่อนของคุณ');
+  const [customOwnerName, setCustomOwnerName] = useState<string>(() => {
+    return localStorage.getItem(STORAGE_OWNER_NAME_KEY) || '';
+  });
+  const [isEditingOwnerName, setIsEditingOwnerName] = useState(false);
+  const [tempOwnerName, setTempOwnerName] = useState('');
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
 
@@ -117,7 +126,6 @@ export default function App() {
 
   // Firestore sync state tracking
   const [isFirestoreConnected, setIsFirestoreConnected] = useState(false);
-  const [isMigratingInitialData, setIsMigratingInitialData] = useState(false);
 
   // Modals State
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -217,108 +225,46 @@ export default function App() {
       setTheme(getThemeById(savedThemeId));
     }
 
-    // Load stored stickers
+    // Load stored stickers (start fresh, purge any old mock stickers)
     const savedStickers = localStorage.getItem(STORAGE_STICKERS_KEY);
     if (savedStickers) {
       try {
-        setStickers(JSON.parse(savedStickers));
+        const parsed = JSON.parse(savedStickers);
+        if (Array.isArray(parsed)) {
+          // Remove any previous sample mock stickers
+          const realStickers = parsed.filter((s: any) => !s.id?.startsWith('st-'));
+          setStickers(realStickers);
+          localStorage.setItem(STORAGE_STICKERS_KEY, JSON.stringify(realStickers));
+        } else {
+          setStickers([]);
+        }
       } catch (e) {
         console.error('Error parsing stickers:', e);
+        setStickers([]);
       }
     } else {
-      const sampleStickers: StickerPlacement[] = [
-        { id: 'st-1', date: '2026-09-12', emoji: '⭐', name: 'สำคัญพิเศษ', createdAt: Date.now() },
-        { id: 'st-2', date: '2026-09-15', emoji: '💻', name: 'งานคอม', createdAt: Date.now() },
-        { id: 'st-3', date: '2026-09-18', emoji: '🎉', name: 'ปาร์ตี้', createdAt: Date.now() },
-        { id: 'st-4', date: '2026-09-20', emoji: '🏃', name: 'วิ่งออกกำลังกาย', createdAt: Date.now() },
-      ];
-      setStickers(sampleStickers);
+      setStickers([]);
     }
 
-    // Load stored events
+    // Load stored events (start fresh, purge any old mock sample events)
     const savedEvents = localStorage.getItem(STORAGE_EVENTS_KEY);
     if (savedEvents) {
       try {
-        setEvents(JSON.parse(savedEvents));
+        const parsed = JSON.parse(savedEvents);
+        if (Array.isArray(parsed)) {
+          // Remove any previous sample mock events
+          const realEvents = parsed.filter((e: any) => !e.id?.startsWith('sample-'));
+          setEvents(realEvents);
+          localStorage.setItem(STORAGE_EVENTS_KEY, JSON.stringify(realEvents));
+        } else {
+          setEvents([]);
+        }
       } catch (e) {
         console.error('Error parsing events:', e);
+        setEvents([]);
       }
     } else {
-      const initialEvents: CalendarEvent[] = [
-        {
-          id: 'sample-1',
-          title: 'ประชุมวางแผนกลยุทธ์ทีม',
-          sticker: '💼',
-          description: 'สรุปเป้าหมายไตรมาสและงานโปรเจกต์',
-          date: '2026-09-12',
-          slot: 'morning',
-          slots: ['morning'],
-          startTime: '09:30',
-          endTime: '11:00',
-          location: 'ห้องประชุมชั้น 4',
-        },
-        {
-          id: 'sample-2',
-          title: 'พบลูกค้าส่งมอบระบบ',
-          sticker: '💻',
-          description: 'Demo ฟีเจอร์ใหม่และรับฟัง feedback',
-          date: '2026-09-12',
-          slot: 'afternoon',
-          slots: ['afternoon'],
-          startTime: '14:00',
-          endTime: '15:30',
-          location: 'สยามสแควร์วัน',
-        },
-        {
-          id: 'sample-3',
-          title: 'ดินเนอร์ฉลองวันเกิดเพื่อน',
-          sticker: '🎂',
-          description: 'นัดทานอาหารญี่ปุ่น',
-          date: '2026-09-12',
-          slot: 'evening',
-          slots: ['evening'],
-          startTime: '19:00',
-          endTime: '21:00',
-          location: 'EmQuartier',
-        },
-        {
-          id: 'sample-4',
-          title: 'ตรวจสุขภาพประจำปี',
-          sticker: '🏥',
-          description: 'งดน้ำงดอาหารหลัง 22:00',
-          date: '2026-09-15',
-          slot: 'morning',
-          slots: ['morning'],
-          startTime: '08:00',
-          endTime: '10:30',
-          location: 'โรงพยาบาลกรุงเทพ',
-        },
-        {
-          id: 'sample-5',
-          title: 'สัมมนาออนไลน์ AI Trends',
-          sticker: '🚀',
-          description: 'Google AI Developers Session',
-          date: '2026-09-15',
-          slot: 'afternoon',
-          slots: ['afternoon'],
-          startTime: '13:30',
-          endTime: '16:00',
-          location: 'Google Meet',
-        },
-        {
-          id: 'sample-6',
-          title: 'ฟิตเนส & โยคะผ่อนคลาย',
-          sticker: '🧘',
-          description: 'คลาสยืดกล้ามเนื้อเย็นวันศุกร์',
-          date: '2026-09-18',
-          slot: 'evening',
-          slots: ['evening'],
-          startTime: '18:30',
-          endTime: '20:00',
-          location: 'Fitness Club',
-        },
-      ];
-      setEvents(initialEvents);
+      setEvents([]);
     }
 
     // Check for add_friend parameter in URL
@@ -335,13 +281,13 @@ export default function App() {
 
   // Save changes locally if not in View-Only mode
   useEffect(() => {
-    if (!isViewOnly && events.length > 0) {
+    if (!isViewOnly) {
       localStorage.setItem(STORAGE_EVENTS_KEY, JSON.stringify(events));
     }
   }, [events, isViewOnly]);
 
   useEffect(() => {
-    if (!isViewOnly && stickers.length > 0) {
+    if (!isViewOnly) {
       localStorage.setItem(STORAGE_STICKERS_KEY, JSON.stringify(stickers));
     }
   }, [stickers, isViewOnly]);
@@ -387,45 +333,31 @@ export default function App() {
       updatedAt: new Date().toISOString(),
     }).catch((e) => console.warn('User profile sync error:', e));
 
-    // 2. Subscribe to user's events in Firestore Calendar-LA
+    // 2. Subscribe to user's events in Firestore
     const unsubscribeEvents = subscribeToEvents(
       user.uid,
       (cloudEvents) => {
-        if (cloudEvents.length > 0) {
-          // Merge cloud events with any Google Calendar events currently loaded
-          setEvents((prev) => {
-            const googleEvents = prev.filter((e) => e.isGoogleEvent);
-            const cloudIds = new Set(cloudEvents.map((e) => e.id));
-            const uniqueGoogle = googleEvents.filter((g) => !cloudIds.has(g.id));
-            return [...cloudEvents, ...uniqueGoogle];
-          });
-        } else if (events.length > 0 && !isMigratingInitialData) {
-          // Seed initial local events into Firestore so user's data isn't blank
-          setIsMigratingInitialData(true);
-          events.forEach((ev) => {
-            saveEventToFirestore(user.uid, ev).catch(console.error);
-          });
-        }
+        // Load user's existing events from Firestore and merge with any active Google Calendar events
+        setEvents((prev) => {
+          const googleEvents = prev.filter((e) => e.isGoogleEvent);
+          const cloudIds = new Set(cloudEvents.map((e) => e.id));
+          const uniqueGoogle = googleEvents.filter((g) => !cloudIds.has(g.id));
+          return [...cloudEvents, ...uniqueGoogle];
+        });
       },
       (err) => console.warn('Firestore events listener:', err)
     );
 
-    // 3. Subscribe to user's stickers in Firestore Calendar-LA
+    // 3. Subscribe to user's stickers in Firestore
     const unsubscribeStickers = subscribeToStickers(
       user.uid,
       (cloudStickers) => {
-        if (cloudStickers.length > 0) {
-          setStickers(cloudStickers);
-        } else if (stickers.length > 0 && !isMigratingInitialData) {
-          stickers.forEach((stk) => {
-            saveStickerToFirestore(user.uid, stk).catch(console.error);
-          });
-        }
+        setStickers(cloudStickers);
       },
       (err) => console.warn('Firestore stickers listener:', err)
     );
 
-    // 4. Subscribe to user's friends in Firestore Calendar-LA
+    // 4. Subscribe to user's friends in Firestore
     const unsubscribeFriends = subscribeToFriends(
       user.uid,
       (cloudFriends) => {
@@ -440,6 +372,50 @@ export default function App() {
       unsubscribeFriends();
     };
   }, [user, isViewOnly]);
+
+  // Automatically fetch existing Google Calendar events whenever token is available or viewed month changes
+  useEffect(() => {
+    if (!token || isViewOnly) return;
+
+    let isCancelled = false;
+    const loadGCalEvents = async () => {
+      try {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+        const timeMin = new Date(year, month - 1, 1).toISOString();
+        const timeMax = new Date(year, month + 2, 0, 23, 59, 59).toISOString();
+
+        const gEvents = await fetchGoogleCalendarEvents(token, timeMin, timeMax);
+        if (!isCancelled) {
+          setEvents((prev) => {
+            const nonGoogle = prev.filter((e) => !e.isGoogleEvent);
+            return [...nonGoogle, ...gEvents];
+          });
+          setGcalConnected(true);
+        }
+      } catch (err: any) {
+        if (!isCancelled) {
+          console.warn('Google Calendar auto-fetch notice:', err);
+          if (
+            err instanceof InsufficientScopeError ||
+            err?.message?.includes('insufficient') ||
+            err?.message?.includes('403') ||
+            err?.message?.includes('401')
+          ) {
+            setToken(null);
+            setGcalConnected(false);
+            setAccessToken(null);
+          }
+        }
+      }
+    };
+
+    loadGCalEvents();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [token, currentDate.getFullYear(), currentDate.getMonth(), isViewOnly]);
 
   // Subscribe to viewing friend's live events & stickers
   useEffect(() => {
@@ -601,8 +577,12 @@ export default function App() {
       setToken(null);
       setGcalConnected(false);
       setIsFirestoreConnected(false);
-      setEvents((prev) => prev.filter((e) => !e.isGoogleEvent));
-      showToast('ออกจากระบบ Google เรียบร้อยแล้ว');
+      setEvents([]);
+      setStickers([]);
+      setFriends([]);
+      localStorage.removeItem(STORAGE_EVENTS_KEY);
+      localStorage.removeItem(STORAGE_STICKERS_KEY);
+      showToast('ออกจากระบบเรียบร้อยแล้ว (รีเซ็ตข้อมูลเริ่มต้นใหม่)');
     } catch (err) {
       console.error('Logout error:', err);
     }
@@ -894,13 +874,43 @@ export default function App() {
     setSlotListModalOpen(true);
   };
 
+  // Save custom owner name
+  const handleSaveOwnerName = () => {
+    const trimmed = tempOwnerName.trim();
+    if (trimmed) {
+      setCustomOwnerName(trimmed);
+      localStorage.setItem(STORAGE_OWNER_NAME_KEY, trimmed);
+      if (user) {
+        saveUserProfile({
+          uid: user.uid,
+          email: user.email || '',
+          displayName: trimmed,
+          photoURL: user.photoURL || '',
+          themeId: theme.id,
+          updatedAt: new Date().toISOString(),
+        }).catch((e) => console.warn('User profile sync error:', e));
+      }
+      showToast(`เปลี่ยนชื่อหัวปฏิทินเป็น "${trimmed} Calendar" เรียบร้อยแล้ว`);
+    }
+    setIsEditingOwnerName(false);
+  };
+
+  // Schedule Owner Name logic: follows user owner -> [Name] Calendar
+  const calendarOwnerName = viewingFriend
+    ? (viewingFriend.displayName || viewingFriend.email?.split('@')[0] || 'เพื่อน')
+    : isViewOnly
+    ? (sharedOwnerName || 'เพื่อน')
+    : (customOwnerName || user?.displayName || user?.email?.split('@')[0] || 'My');
+
+  const calendarHeaderTitle = `${calendarOwnerName} Calendar`;
+
   // Share Handler (generates read-only link for friends)
   const handleOpenShareModal = () => {
     const url = generateShareUrl(
       events,
       stickers,
       theme.id,
-      user?.displayName || 'เจ้าของปฏิทิน',
+      calendarOwnerName !== 'My' ? calendarOwnerName : (user?.displayName || 'เจ้าของปฏิทิน'),
       user?.uid
     );
     setShareUrl(url);
@@ -986,16 +996,63 @@ export default function App() {
                 <CalendarIcon className="w-4 h-4 text-white" />
               </div>
 
-              {isViewOnly ? (
-                <div className="min-w-0 max-w-[150px] sm:max-w-none">
-                  <h1 className="text-xs sm:text-base font-bold tracking-tight truncate text-stone-900">
-                    ปฏิทินของ {sharedOwnerName}
-                  </h1>
-                </div>
+              {isEditingOwnerName ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleSaveOwnerName();
+                  }}
+                  className="flex items-center gap-1 min-w-0"
+                >
+                  <input
+                    type="text"
+                    value={tempOwnerName}
+                    onChange={(e) => setTempOwnerName(e.target.value)}
+                    placeholder="ชื่อของคุณ"
+                    autoFocus
+                    className="px-2 py-0.5 text-xs sm:text-sm font-bold border border-amber-400 rounded-lg bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 outline-none w-28 sm:w-36 focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                  />
+                  <button
+                    type="submit"
+                    className="p-1 rounded-md bg-amber-500 text-white hover:bg-amber-600 transition-colors cursor-pointer"
+                    title="บันทึกชื่อ"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingOwnerName(false)}
+                    className="p-1 rounded-md text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 transition-colors cursor-pointer"
+                    title="ยกเลิก"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </form>
               ) : (
-                <span className="font-bold text-xs sm:text-sm tracking-tight text-stone-900">
-                  Slot Calendar
-                </span>
+                <div className="flex items-center gap-1 group min-w-0 max-w-[150px] xs:max-w-[200px] sm:max-w-none">
+                  <h1
+                    id="calendar-header-title"
+                    className="font-bold text-xs sm:text-sm md:text-base tracking-tight truncate text-stone-900 dark:text-stone-100"
+                    title={calendarHeaderTitle}
+                  >
+                    <span className="text-stone-900 dark:text-stone-100">{calendarOwnerName}</span>{' '}
+                    <span className="text-amber-600 dark:text-amber-500 font-semibold">Calendar</span>
+                  </h1>
+
+                  {!isEffectiveViewOnly && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTempOwnerName(customOwnerName || user?.displayName || (calendarOwnerName === 'My' ? '' : calendarOwnerName));
+                        setIsEditingOwnerName(true);
+                      }}
+                      title="แก้ไขชื่อเจ้าของตาราง"
+                      className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 rounded text-stone-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-stone-100 dark:hover:bg-stone-800 transition-all cursor-pointer shrink-0"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               )}
 
               {/* Firebase Cloud Status Badge */}
@@ -1427,7 +1484,7 @@ export default function App() {
         eventsCount={events.length}
         stickersCount={stickers.length}
         isCloudSynced={!!user}
-        ownerName={user?.displayName || 'คุณ'}
+        ownerName={calendarOwnerName !== 'My' ? calendarOwnerName : (user?.displayName || 'คุณ')}
       />
 
       <ThemeSelector

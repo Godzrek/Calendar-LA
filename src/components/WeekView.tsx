@@ -1,6 +1,7 @@
 import React from 'react';
 import { CalendarEvent, StickerPlacement, ThemeConfig, TimeSlot } from '../types';
 import { formatDateKey, formatThaiDate, THAI_FULL_DAYS, filterEventsBySlot } from '../utils/dateUtils';
+import { getDaySpecialInfo } from '../utils/thaiHolidays';
 import { Sparkles, Clock } from 'lucide-react';
 
 interface WeekViewProps {
@@ -55,24 +56,57 @@ export const WeekView: React.FC<WeekViewProps> = ({
     <div className="grid grid-cols-1 md:grid-cols-7 gap-2.5 py-1">
       {weekDays.map((day) => {
         const dayStickers = stickers.filter((s) => s.date === day.dateKey);
+        const specialInfo = getDaySpecialInfo(day.dateKey);
 
         return (
           <div
             key={day.dateKey}
-            className={`flex flex-col rounded-2xl border p-2.5 transition-all ${theme.cardBg} ${
-              day.isToday ? 'ring-2 ring-amber-500 shadow-md' : theme.cardBorder
+            className={`flex flex-col rounded-2xl border p-2.5 transition-all ${
+              specialInfo.isHoliday
+                ? theme.isDark
+                  ? 'bg-stone-900 border-stone-700 shadow-xs'
+                  : 'bg-stone-200/90 border-stone-300 shadow-2xs'
+                : theme.cardBg
+            } ${
+              day.isToday
+                ? 'ring-2 ring-amber-500 shadow-md'
+                : specialInfo.isHoliday
+                ? 'border-stone-300/90'
+                : theme.cardBorder
             }`}
           >
             {/* Header */}
-            <div className="flex items-center justify-between pb-2 border-b border-stone-100 mb-2">
+            <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-stone-800 mb-2">
               <div>
-                <span className="text-[11px] font-semibold text-stone-400 block leading-tight">
-                  {day.dayName}
-                </span>
+                <div className="flex items-center gap-1">
+                  <span className="text-[11px] font-semibold text-stone-400 block leading-tight">
+                    {day.dayName}
+                  </span>
+                  {specialInfo.isHoliday && (
+                    <span
+                      title={specialInfo.holidayName}
+                      className="text-[8px] font-bold px-1 py-0.2 rounded bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300"
+                    >
+                      หยุด
+                    </span>
+                  )}
+                  {specialInfo.isWanPhra && (
+                    <span
+                      title={specialInfo.wanPhraDescription}
+                      className="text-[10px] leading-none text-amber-600 dark:text-amber-400"
+                    >
+                      🪷
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <span
                     className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
-                      day.isToday ? 'bg-amber-500 text-white' : theme.textColor
+                      day.isToday
+                        ? 'bg-amber-500 text-white'
+                        : specialInfo.isHoliday
+                        ? 'bg-red-500/15 text-red-600 dark:text-red-400'
+                        : theme.textColor
                     }`}
                   >
                     {day.dayNumber}

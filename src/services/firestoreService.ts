@@ -20,8 +20,13 @@ import { CalendarEvent, StickerPlacement, FriendUser } from '../types';
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// CRITICAL: Connect to the requested database instance "calendar-la"
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// Connect to the Firestore database: use named database if provided and not default, otherwise standard default
+export const db =
+  firebaseConfig.firestoreDatabaseId &&
+  firebaseConfig.firestoreDatabaseId !== '(default)' &&
+  firebaseConfig.firestoreDatabaseId !== ''
+    ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+    : getFirestore(app);
 
 // Operation types for strict Firestore error handling
 export enum OperationType {

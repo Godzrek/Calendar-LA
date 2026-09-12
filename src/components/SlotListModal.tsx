@@ -1,6 +1,7 @@
 import React from 'react';
 import { CalendarEvent, ThemeConfig, TimeSlot } from '../types';
 import { formatThaiDate } from '../utils/dateUtils';
+import { getDaySpecialInfo } from '../utils/thaiHolidays';
 import { X, Plus, Clock, MapPin, Calendar as CalendarIcon, Edit3 } from 'lucide-react';
 
 interface SlotListModalProps {
@@ -37,6 +38,8 @@ export const SlotListModal: React.FC<SlotListModalProps> = ({
       ? theme.slots.afternoon
       : theme.slots.evening;
 
+  const specialInfo = getDaySpecialInfo(dateKey);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150">
       <div
@@ -63,6 +66,40 @@ export const SlotListModal: React.FC<SlotListModalProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Holiday & Wan Phra detail banner if present */}
+        {(specialInfo.isHoliday || specialInfo.isWanPhra) && (
+          <div className="mt-3 space-y-1.5">
+            {specialInfo.isHoliday && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200/80 dark:border-red-900/60 text-red-800 dark:text-red-200">
+                <span className="text-base leading-none">🚩</span>
+                <div className="min-w-0 flex-1">
+                  <span className="text-xs font-bold text-red-700 dark:text-red-300">
+                    วันหยุดราชการ: {specialInfo.holidayName}
+                  </span>
+                  {specialInfo.isSubstitution && (
+                    <span className="text-[10px] ml-1.5 px-1.5 py-0.2 rounded-full bg-red-100 dark:bg-red-900/70 text-red-700 dark:text-red-200 font-medium">
+                      วันหยุดชดเชย
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+            {specialInfo.isWanPhra && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/60 text-amber-900 dark:text-amber-200">
+                <span className="text-base leading-none">🪷</span>
+                <div className="min-w-0 flex-1">
+                  <span className="text-xs font-bold text-amber-800 dark:text-amber-300">
+                    {specialInfo.wanPhraDescription}
+                  </span>
+                  <span className="text-[11px] text-amber-600 dark:text-amber-400 ml-1.5">
+                    (วันธรรมสวนะ)
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* List of events in this slot */}
         <div className="py-4 space-y-2.5 max-h-72 overflow-y-auto">
