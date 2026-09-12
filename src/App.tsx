@@ -14,6 +14,8 @@ import {
   googleSignOut,
   getAccessToken,
   setAccessToken,
+  parseFirebaseAuthError,
+  AuthErrorInfo,
 } from './services/firebaseAuth';
 import {
   fetchGoogleCalendarEvents,
@@ -49,6 +51,7 @@ import { ThemeSelector } from './components/ThemeSelector';
 import { SlotListModal } from './components/SlotListModal';
 import { FriendsModal } from './components/FriendsModal';
 import { CompareScheduleModal } from './components/CompareScheduleModal';
+import { AuthTroubleshootModal } from './components/AuthTroubleshootModal';
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -132,6 +135,10 @@ export default function App() {
   const [slotListDate, setSlotListDate] = useState('');
   const [slotListSlot, setSlotListSlot] = useState<TimeSlot>('morning');
   const [slotListEvents, setSlotListEvents] = useState<CalendarEvent[]>([]);
+
+  // Auth Troubleshooting Modal
+  const [authErrorModalOpen, setAuthErrorModalOpen] = useState(false);
+  const [authErrorInfo, setAuthErrorInfo] = useState<AuthErrorInfo | null>(null);
 
   // Toast message
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -345,15 +352,18 @@ export default function App() {
     const unsubscribeAuth = initAuth(
       (authedUser, accessToken) => {
         setUser(authedUser);
-        setToken(accessToken);
-        setAccessToken(accessToken);
-        setGcalConnected(true);
         setIsFirestoreConnected(true);
+        if (accessToken) {
+          setToken(accessToken);
+          setGcalConnected(true);
+        } else {
+          setToken(null);
+          setGcalConnected(false);
+        }
       },
       () => {
         setUser(null);
         setToken(null);
-        setAccessToken(null);
         setGcalConnected(false);
         setIsFirestoreConnected(false);
       }
@@ -496,39 +506,57 @@ export default function App() {
   }, [token, currentDate]);
 
   // Handle Google Login
-  const handleGoogleLogin = async () => {
+  const handleGoogleLogin = async (includeCalendarScope: boolean = true) => {
     setIsSigningIn(true);
     try {
-      const res = await googleSignIn();
+      const res = await googleSignIn(includeCalendarScope);
       if (res) {
         setUser(res.user);
-        setToken(res.accessToken);
-        setGcalConnected(true);
         setIsFirestoreConnected(true);
-        showToast(`เข้าสู่ระบบ Google สำเร็จ: ${res.user.displayName || res.user.email}`);
 
-        // Automatically sync Google Calendar events after login
-        const year = currentDate.getFullYear();
-        const month = currentDate.getMonth();
-        const timeMin = new Date(year, month - 1, 1).toISOString();
-        const timeMax = new Date(year, month + 2, 0, 23, 59, 59).toISOString();
+        if (res.accessToken) {
+          setToken(res.accessToken);
+          setGcalConnected(true);
+          showToast(`เข้าสู่ระบบ Google สำเร็จ: ${res.user.displayName || res.user.email}`);
 
-        try {
-          const gEvents = await fetchGoogleCalendarEvents(res.accessToken, timeMin, timeMax);
-          if (gEvents.length > 0) {
-            setEvents((prev) => {
-              const nonGoogle = prev.filter((e) => !e.isGoogleEvent);
-              return [...nonGoogle, ...gEvents];
-            });
-            showToast(`เชื่อมต่อ Google Calendar สำเร็จ (นำเข้า ${gEvents.length} นัดหมาย)`);
+          // Automatically sync Google Calendar events after login
+          const year = currentDate.getFullYear();
+          const month = currentDate.getMonth();
+          const timeMin = new Date(year, month - 1, 1).toISOString();
+          const timeMax = new Date(year, month + 2, 0, 23, 59, 59).toISOString();
+
+          try {
+            const gEvents = await fetchGoogleCalendarEvents(res.accessToken, timeMin, timeMax);
+            if (gEvents.length > 0) {
+              setEvents((prev) => {
+                const nonGoogle = prev.filter((e) => !e.isGoogleEvent);
+                return [...nonGoogle, ...gEvents];
+              });
+              showToast(`เชื่อมต่อ Google Calendar สำเร็จ (นำเข้า ${gEvents.length} นัดหมาย)`);
+            }
+          } catch (gcalErr) {
+            console.warn('Initial Google Calendar fetch:', gcalErr);
           }
-        } catch (gcalErr) {
-          console.warn('Initial Google Calendar fetch:', gcalErr);
+        } else {
+          setToken(null);
+          setGcalConnected(false);
+          showToast(`เข้าสู่ระบบสำเร็จ: ${res.user.displayName || res.user.email}`);
         }
+
+        // Successfully signed in - dismiss troubleshooting modal
+        setAuthErrorModalOpen(false);
+        setAuthErrorInfo(null);
       }
     } catch (err: any) {
       console.error('Login error:', err);
-      showToast('เข้าสู่ระบบไม่สำเร็จ หรือปิดหน้าต่างยืนยัน');
+      const parsed = parseFirebaseAuthError(err);
+      setAuthErrorInfo(parsed);
+      setAuthErrorModalOpen(true);
+      if (parsed.code === 'auth/popup-closed-by-user' || parsed.code === 'auth/cancelled-popup-request') {
+        showToast('หน้าต่างเข้าสู่ระบบถูกปิด โปรดลองใหม่อีกครั้ง');
+      } else {
+        showToast(`เข้าสู่ระบบไม่สำเร็จ: ${parsed.title}`);
+      }
     } finally {
       setIsSigningIn(false);
     }
@@ -1016,34 +1044,49 @@ export default function App() {
                       </button>
                     </div>
                   ) : (
-                    <button
-                      type="button"
-                      id="google-signin-btn"
-                      onClick={handleGoogleLogin}
-                      disabled={isSigningIn}
-                      title="เข้าสู่ระบบด้วย Google และเชื่อมต่อ Google Calendar ของตนเอง"
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-stone-300 bg-white hover:bg-stone-50 text-stone-800 text-xs font-medium shadow-2xs transition-colors cursor-pointer shrink-0 whitespace-nowrap"
-                    >
-                      <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 48 48">
-                        <path
-                          fill="#EA4335"
-                          d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-                        />
-                        <path
-                          fill="#4285F4"
-                          d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-                        />
-                        <path
-                          fill="#FBBC05"
-                          d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-                        />
-                        <path
-                          fill="#34A853"
-                          d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-                        />
-                      </svg>
-                      <span>{isSigningIn ? 'กำลังเชื่อมต่อ...' : 'Google'}</span>
-                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        id="google-signin-btn"
+                        onClick={() => handleGoogleLogin(true)}
+                        disabled={isSigningIn}
+                        title="เข้าสู่ระบบด้วย Google และเชื่อมต่อ Google Calendar ของตนเอง"
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-stone-300 bg-white hover:bg-stone-50 text-stone-800 text-xs font-medium shadow-2xs transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+                      >
+                        <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 48 48">
+                          <path
+                            fill="#EA4335"
+                            d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+                          />
+                          <path
+                            fill="#4285F4"
+                            d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+                          />
+                          <path
+                            fill="#FBBC05"
+                            d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+                          />
+                          <path
+                            fill="#34A853"
+                            d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+                          />
+                        </svg>
+                        <span>{isSigningIn ? 'กำลังเชื่อมต่อ...' : 'Google'}</span>
+                      </button>
+
+                      {/* If in iframe, provide a direct Open-in-new-tab button to bypass iframe cookie/popup blocks */}
+                      {typeof window !== 'undefined' && window.self !== window.top && (
+                        <button
+                          type="button"
+                          id="open-in-new-tab-btn"
+                          onClick={() => window.open(window.location.href, '_blank')}
+                          title="เปิดในแท็บใหม่ (แนะนำสำหรับการเข้าสู่ระบบ Google เพื่อไม่ให้เบราว์เซอร์บล็อกป๊อปอัป)"
+                          className="p-1.5 rounded-xl border border-blue-200 bg-blue-50/80 hover:bg-blue-100 text-blue-600 transition-colors cursor-pointer shrink-0"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   )}
 
                   {/* Primary Add Event Button with Theme-aware styling (Hidden when viewing friend) */}
@@ -1381,6 +1424,16 @@ export default function App() {
         }
         theme={theme}
         currentDate={currentDate}
+      />
+
+      {/* Firebase Auth Troubleshooting & Help Modal */}
+      <AuthTroubleshootModal
+        isOpen={authErrorModalOpen}
+        onClose={() => setAuthErrorModalOpen(false)}
+        errorInfo={authErrorInfo}
+        onRetryWithCalendar={() => handleGoogleLogin(true)}
+        onRetryBasicAuth={() => handleGoogleLogin(false)}
+        isRetrying={isSigningIn}
       />
     </div>
   );

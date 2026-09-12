@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CalendarEvent, ThemeConfig } from '../types';
 import { formatThaiDate } from '../utils/dateUtils';
 import { X, Clock, MapPin, AlignLeft, Trash2, ExternalLink, AlertTriangle, Edit3 } from 'lucide-react';
@@ -25,6 +25,14 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Always reset deletion state whenever modal opens or event changes
+  useEffect(() => {
+    if (isOpen) {
+      setIsDeleting(false);
+      setShowConfirmDelete(false);
+    }
+  }, [isOpen, event?.id]);
+
   if (!isOpen || !event) return null;
 
   const slotConfig =
@@ -34,14 +42,24 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
       ? theme.slots.afternoon
       : theme.slots.evening;
 
+  const handleClose = () => {
+    setIsDeleting(false);
+    setShowConfirmDelete(false);
+    onClose();
+  };
+
   const handleDelete = async () => {
+    if (isDeleting) return;
     setIsDeleting(true);
     try {
       await onDelete(event);
       setShowConfirmDelete(false);
+      setIsDeleting(false);
       onClose();
     } catch (err) {
       console.error(err);
+      setIsDeleting(false);
+    } finally {
       setIsDeleting(false);
     }
   };
@@ -90,7 +108,7 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
           >
             <X className="w-5 h-5" />
@@ -202,7 +220,7 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
 
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-stone-200 dark:bg-stone-800 hover:bg-stone-300 dark:hover:bg-stone-700 transition-colors cursor-pointer"
             >
               ปิด
