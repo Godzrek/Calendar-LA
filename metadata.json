@@ -1,0 +1,6 @@
+{
+  "name": "Slot Calendar Planner",
+  "description": "Calendar app with Morning, Afternoon, and Evening slots, Google Calendar integration, custom themes, stickers, friend list, schedule viewing, and mutual free-time comparison.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,87 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile information and calendar settings",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "User UID from Firebase Auth" },
+        "email": { "type": "string", "format": "email", "description": "User email address" },
+        "displayName": { "type": "string", "description": "User display name" },
+        "photoURL": { "type": "string", "description": "User profile photo URL" },
+        "themeId": { "type": "string", "description": "Selected UI theme ID" },
+        "isShared": { "type": "boolean", "description": "Whether calendar is publicly shareable" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last update" }
+      },
+      "required": ["uid", "email"]
+    },
+    "CalendarEvent": {
+      "title": "CalendarEvent",
+      "description": "A scheduled event in the calendar",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier of the event" },
+        "userId": { "type": "string", "description": "UID of the event owner" },
+        "title": { "type": "string", "description": "Event title", "maxLength": 200 },
+        "description": { "type": "string", "description": "Optional notes or details", "maxLength": 1000 },
+        "date": { "type": "string", "description": "Date in YYYY-MM-DD format", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "slot": { "type": "string", "enum": ["morning", "afternoon", "evening"] },
+        "slots": { "type": "array", "description": "List of time slots covered" },
+        "startTime": { "type": "string", "description": "Start time HH:mm" },
+        "endTime": { "type": "string", "description": "End time HH:mm" },
+        "location": { "type": "string", "description": "Optional event location", "maxLength": 200 },
+        "sticker": { "type": "string", "description": "Optional emoji sticker" },
+        "isGoogleEvent": { "type": "boolean", "description": "Whether synced from Google Calendar" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "description": "Last update timestamp" }
+      },
+      "required": ["userId", "title", "date", "slot", "startTime", "endTime"]
+    },
+    "StickerPlacement": {
+      "title": "StickerPlacement",
+      "description": "A sticker pinned to a specific day on the calendar",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique ID of the sticker placement" },
+        "userId": { "type": "string", "description": "UID of the owner" },
+        "date": { "type": "string", "description": "Date in YYYY-MM-DD format", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "emoji": { "type": "string", "description": "Emoji character" },
+        "name": { "type": "string", "description": "Name or label of the sticker" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["userId", "date", "emoji"]
+    },
+    "Friend": {
+      "title": "Friend",
+      "description": "A user's friend connection to view their calendar",
+      "type": "object",
+      "properties": {
+        "friendUid": { "type": "string", "description": "UID of the friend" },
+        "email": { "type": "string", "format": "email", "description": "Friend's email" },
+        "displayName": { "type": "string", "description": "Friend's display name" },
+        "photoURL": { "type": "string", "description": "Friend's profile picture URL" },
+        "themeId": { "type": "string", "description": "Friend's preferred theme ID" },
+        "addedAt": { "type": "string", "description": "ISO timestamp when added" }
+      },
+      "required": ["friendUid", "email"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile document and preferences"
+    },
+    "/users/{userId}/events/{eventId}": {
+      "schema": "CalendarEvent",
+      "description": "Collection of calendar events belonging to the user"
+    },
+    "/users/{userId}/stickers/{stickerId}": {
+      "schema": "StickerPlacement",
+      "description": "Collection of stickers pinned to calendar days by the user"
+    },
+    "/users/{userId}/friends/{friendId}": {
+      "schema": "Friend",
+      "description": "Collection of friends saved by the user"
+    }
+  }
+}

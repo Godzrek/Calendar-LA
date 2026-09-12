@@ -1,0 +1,59 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all unmatched paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    // User profile document
+    match /users/{userId} {
+      // Anyone can get user's public calendar profile (display name, photo, theme) for shared view
+      allow get: if true;
+      allow list: if isSignedIn();
+      allow create, update: if isOwner(userId);
+      allow delete: if false;
+
+      // Calendar Events subcollection
+      match /events/{eventId} {
+        // Read is allowed for all so friends with the share link can view
+        allow get, list: if true;
+        // Only owner can create, update, or delete events
+        allow create: if isOwner(userId) && isValidId(eventId);
+        allow update: if isOwner(userId);
+        allow delete: if isOwner(userId);
+      }
+
+      // Stickers subcollection
+      match /stickers/{stickerId} {
+        // Read is allowed for all so friends with the share link can view
+        allow get, list: if true;
+        // Only owner can create, update, or delete stickers
+        allow create: if isOwner(userId) && isValidId(stickerId);
+        allow update: if isOwner(userId);
+        allow delete: if isOwner(userId);
+      }
+
+      // Friends subcollection
+      match /friends/{friendId} {
+        // Only the owner can view and manage their friends list
+        allow get, list: if isOwner(userId);
+        allow create, update, delete: if isOwner(userId);
+      }
+    }
+  }
+}
