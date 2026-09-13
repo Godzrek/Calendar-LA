@@ -14,6 +14,7 @@ import {
   googleSignOut,
   getAccessToken,
   setAccessToken,
+  requestGoogleCalendarAccess,
   parseFirebaseAuthError,
   AuthErrorInfo,
 } from './services/firebaseAuth';
@@ -23,6 +24,7 @@ import {
   updateGoogleCalendarEvent,
   deleteGoogleCalendarEvent,
   InsufficientScopeError,
+  ApiDisabledError,
 } from './services/calendarApi';
 import {
   checkIsViewOnlyFromUrl,
@@ -53,6 +55,8 @@ import { SlotListModal } from './components/SlotListModal';
 import { FriendsModal } from './components/FriendsModal';
 import { CompareScheduleModal } from './components/CompareScheduleModal';
 import { AuthTroubleshootModal } from './components/AuthTroubleshootModal';
+import { CalendarScopeModal } from './components/CalendarScopeModal';
+import { deduplicateEvents } from './utils/eventDeduplication';
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -148,6 +152,11 @@ export default function App() {
   // Auth Troubleshooting Modal
   const [authErrorModalOpen, setAuthErrorModalOpen] = useState(false);
   const [authErrorInfo, setAuthErrorInfo] = useState<AuthErrorInfo | null>(null);
+
+  // Google Calendar Scope / API Enable Modal
+  const [isScopeModalOpen, setIsScopeModalOpen] = useState(false);
+  const [scopeModalApiDisabled, setScopeModalApiDisabled] = useState(false);
+  const [scopeModalApiUrl, setScopeModalApiUrl] = useState<string | undefined>(undefined);
 
   // Toast message
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -337,12 +346,10 @@ export default function App() {
     const unsubscribeEvents = subscribeToEvents(
       user.uid,
       (cloudEvents) => {
-        // Load user's existing events from Firestore and merge with any active Google Calendar events
+        // Load user's existing events from Firestore and merge with any active Google Calendar events, removing duplicates
         setEvents((prev) => {
           const googleEvents = prev.filter((e) => e.isGoogleEvent);
-          const cloudIds = new Set(cloudEvents.map((e) => e.id));
-          const uniqueGoogle = googleEvents.filter((g) => !cloudIds.has(g.id));
-          return [...cloudEvents, ...uniqueGoogle];
+          return deduplicateEvents([...cloudEvents, ...googleEvents]);
         });
       },
       (err) => console.warn('Firestore events listener:', err)
@@ -382,14 +389,14 @@ export default function App() {
       try {
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth();
-        const timeMin = new Date(year, month - 1, 1).toISOString();
-        const timeMax = new Date(year, month + 2, 0, 23, 59, 59).toISOString();
+        const timeMin = new Date(year, month - 6, 1, 0, 0, 0).toISOString();
+        const timeMax = new Date(year, month + 12, 0, 23, 59, 59).toISOString();
 
         const gEvents = await fetchGoogleCalendarEvents(token, timeMin, timeMax);
         if (!isCancelled) {
           setEvents((prev) => {
             const nonGoogle = prev.filter((e) => !e.isGoogleEvent);
-            return [...nonGoogle, ...gEvents];
+            return deduplicateEvents([...nonGoogle, ...gEvents]);
           });
           setGcalConnected(true);
         }
@@ -447,49 +454,92 @@ export default function App() {
     };
   }, [viewingFriend]);
 
-  // Sync with Google Calendar
-  const syncGoogleCalendar = useCallback(async () => {
-    const accessToken = token || getAccessToken();
-    if (!accessToken) {
-      showToast('ยังไม่ได้เชื่อมต่อ Google Calendar');
-      return;
-    }
+  // Sync with Google Calendar (or connect if not yet authorized)
+  const syncGoogleCalendar = useCallback(
+    async (forceReconnect: boolean = false) => {
+      let accessToken = !forceReconnect ? (token || getAccessToken()) : null;
 
-    setIsSyncingGCal(true);
-    try {
-      const year = currentDate.getFullYear();
-      const month = currentDate.getMonth();
-      const timeMin = new Date(year, month - 1, 1).toISOString();
-      const timeMax = new Date(year, month + 2, 0, 23, 59, 59).toISOString();
+      // If no valid access token or force reconnect, open Google authorization popup
+      if (!accessToken) {
+        setIsSyncingGCal(true);
+        try {
+          showToast('กำลังเปิดหน้าต่างขอสิทธิ์ Google Calendar...');
+          const res = await requestGoogleCalendarAccess();
+          if (res.user) {
+            setUser(res.user);
+            setIsFirestoreConnected(true);
+          }
 
-      const gEvents = await fetchGoogleCalendarEvents(accessToken, timeMin, timeMax);
-
-      setEvents((prev) => {
-        const nonGoogle = prev.filter((e) => !e.isGoogleEvent);
-        return [...nonGoogle, ...gEvents];
-      });
-
-      setGcalConnected(true);
-      showToast(`รีเฟรช Google Calendar สำเร็จ (พบนัดหมาย ${gEvents.length} รายการ)`);
-    } catch (err: any) {
-      console.warn('Google Calendar sync notice:', err);
-      if (
-        err instanceof InsufficientScopeError ||
-        err?.message?.includes('insufficient') ||
-        err?.message?.includes('403') ||
-        err?.message?.includes('401')
-      ) {
-        setToken(null);
-        setGcalConnected(false);
-        setAccessToken(null);
-        showToast('สิทธิ์ Google Calendar ไม่เพียงพอหรือหมดอายุ โปรดเข้าสู่ระบบใหม่');
-      } else {
-        showToast('ไม่สามารถดึงข้อมูลจาก Google Calendar ได้');
+          if (res.hasCalendarAccess && res.accessToken) {
+            accessToken = res.accessToken;
+            setToken(res.accessToken);
+            setGcalConnected(true);
+            setAuthErrorModalOpen(false);
+          } else {
+            // User did not grant calendar permission or unchecked the box
+            setIsScopeModalOpen(true);
+            setScopeModalApiDisabled(false);
+            setIsSyncingGCal(false);
+            return;
+          }
+        } catch (authErr: any) {
+          setIsSyncingGCal(false);
+          if (
+            authErr?.code === 'auth/popup-closed-by-user' ||
+            authErr?.code === 'auth/cancelled-popup-request'
+          ) {
+            showToast('หน้าต่างขอสิทธิ์ถูกปิด โปรดลองใหม่อีกครั้ง');
+            return;
+          }
+          const errorInfo = parseFirebaseAuthError(authErr);
+          setAuthErrorInfo(errorInfo);
+          setAuthErrorModalOpen(true);
+          return;
+        }
       }
-    } finally {
-      setIsSyncingGCal(false);
-    }
-  }, [token, currentDate]);
+
+      setIsSyncingGCal(true);
+      try {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+        const timeMin = new Date(year, month - 6, 1, 0, 0, 0).toISOString();
+        const timeMax = new Date(year, month + 12, 0, 23, 59, 59).toISOString();
+
+        const gEvents = await fetchGoogleCalendarEvents(accessToken, timeMin, timeMax);
+
+        setEvents((prev) => {
+          const nonGoogle = prev.filter((e) => !e.isGoogleEvent);
+          return deduplicateEvents([...nonGoogle, ...gEvents]);
+        });
+
+        setGcalConnected(true);
+        showToast(`ดึงข้อมูล Google Calendar สำเร็จ (พบนัดหมาย ${gEvents.length} รายการ)`);
+      } catch (err: any) {
+        console.warn('Google Calendar sync notice:', err);
+        if (err instanceof ApiDisabledError) {
+          setScopeModalApiDisabled(true);
+          setScopeModalApiUrl(err.enableUrl);
+          setIsScopeModalOpen(true);
+        } else if (
+          err instanceof InsufficientScopeError ||
+          err?.message?.includes('insufficient') ||
+          err?.message?.includes('403') ||
+          err?.message?.includes('401')
+        ) {
+          setToken(null);
+          setGcalConnected(false);
+          setAccessToken(null);
+          setScopeModalApiDisabled(false);
+          setIsScopeModalOpen(true);
+        } else {
+          showToast('ไม่สามารถดึงข้อมูลจาก Google Calendar ได้');
+        }
+      } finally {
+        setIsSyncingGCal(false);
+      }
+    },
+    [token, currentDate]
+  );
 
   // Handle Google Login
   const handleGoogleLogin = async (includeCalendarScope: boolean = true) => {
@@ -508,21 +558,25 @@ export default function App() {
           // Automatically sync Google Calendar events after login
           const year = currentDate.getFullYear();
           const month = currentDate.getMonth();
-          const timeMin = new Date(year, month - 1, 1).toISOString();
-          const timeMax = new Date(year, month + 2, 0, 23, 59, 59).toISOString();
+          const timeMin = new Date(year, month - 6, 1, 0, 0, 0).toISOString();
+          const timeMax = new Date(year, month + 12, 0, 23, 59, 59).toISOString();
 
           try {
             const gEvents = await fetchGoogleCalendarEvents(res.accessToken, timeMin, timeMax);
             if (gEvents.length > 0) {
               setEvents((prev) => {
                 const nonGoogle = prev.filter((e) => !e.isGoogleEvent);
-                return [...nonGoogle, ...gEvents];
+                return deduplicateEvents([...nonGoogle, ...gEvents]);
               });
               showToast(`เชื่อมต่อ Google Calendar สำเร็จ (นำเข้า ${gEvents.length} นัดหมาย)`);
             }
           } catch (gcalErr: any) {
             console.warn('Initial Google Calendar fetch notice:', gcalErr);
-            if (
+            if (gcalErr instanceof ApiDisabledError) {
+              setScopeModalApiDisabled(true);
+              setScopeModalApiUrl(gcalErr.enableUrl);
+              setIsScopeModalOpen(true);
+            } else if (
               gcalErr instanceof InsufficientScopeError ||
               gcalErr?.message?.includes('insufficient') ||
               gcalErr?.message?.includes('403')
@@ -530,13 +584,18 @@ export default function App() {
               setToken(null);
               setGcalConnected(false);
               setAccessToken(null);
-              showToast('เข้าสู่ระบบสำเร็จ (แต่ยังไม่ได้รับสิทธิ์ Google Calendar)');
+              setScopeModalApiDisabled(false);
+              setIsScopeModalOpen(true);
             }
           }
         } else {
           setToken(null);
           setGcalConnected(false);
           showToast(`เข้าสู่ระบบสำเร็จ: ${res.user.displayName || res.user.email}`);
+          if (includeCalendarScope && !res.hasCalendarAccess) {
+            setIsScopeModalOpen(true);
+            setScopeModalApiDisabled(false);
+          }
         }
 
         // Successfully signed in - dismiss troubleshooting modal
@@ -703,7 +762,7 @@ export default function App() {
       isGoogleEvent: !!(googleEventId || existing.googleEventId),
     };
 
-    setEvents((prev) => prev.map((e) => (e.id === eventId ? updatedEvent : e)));
+    setEvents((prev) => deduplicateEvents(prev.map((e) => (e.id === eventId ? updatedEvent : e))));
 
     // Save to Firestore Calendar-LA if user is signed in
     if (user) {
@@ -759,7 +818,7 @@ export default function App() {
       isGoogleEvent: !!googleEventId,
     };
 
-    setEvents((prev) => [...prev, newEvent]);
+    setEvents((prev) => deduplicateEvents([...prev, newEvent]));
 
     // Save to Firestore Calendar-LA if user is signed in
     if (user) {
@@ -1118,27 +1177,41 @@ export default function App() {
                 )}
               </button>
 
-              {/* Google Calendar Controls - Single Unified Button: "Google" if not logged in, "รีเฟรช" if logged in */}
+              {/* Google Calendar Controls - Single Unified Button: "Google" if not logged in, "รีเฟรช" or "เชื่อมต่อ Calendar" if logged in */}
               {!isViewOnly && (
                 <>
                   {user ? (
                     <div className="flex items-center gap-1 shrink-0">
-                      {/* Logged in: Displays "รีเฟรช" button */}
-                      <button
-                        type="button"
-                        id="refresh-gcal-btn"
-                        onClick={syncGoogleCalendar}
-                        disabled={isSyncingGCal}
-                        title="รีเฟรชเพื่ออัปเดตนัดหมายจาก Google Calendar ล่าสุด"
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-blue-200 bg-blue-50/90 hover:bg-blue-100 text-blue-800 text-xs font-semibold transition-all shadow-2xs active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
-                      >
-                        <RefreshCw
-                          className={`w-3.5 h-3.5 text-blue-600 shrink-0 ${
-                            isSyncingGCal ? 'animate-spin' : ''
-                          }`}
-                        />
-                        <span>{isSyncingGCal ? 'กำลังอัปเดต...' : 'รีเฟรช'}</span>
-                      </button>
+                      {/* Logged in: Displays "รีเฟรช" if active, or "เชื่อมต่อ Calendar" if not yet authorized */}
+                      {gcalConnected && (token || getAccessToken()) ? (
+                        <button
+                          type="button"
+                          id="refresh-gcal-btn"
+                          onClick={() => syncGoogleCalendar(false)}
+                          disabled={isSyncingGCal}
+                          title="รีเฟรชเพื่ออัปเดตนัดหมายจาก Google Calendar ล่าสุด"
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-blue-200 bg-blue-50/90 hover:bg-blue-100 text-blue-800 text-xs font-semibold transition-all shadow-2xs active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
+                        >
+                          <RefreshCw
+                            className={`w-3.5 h-3.5 text-blue-600 shrink-0 ${
+                              isSyncingGCal ? 'animate-spin' : ''
+                            }`}
+                          />
+                          <span>{isSyncingGCal ? 'กำลังอัปเดต...' : 'รีเฟรช'}</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          id="connect-gcal-btn"
+                          onClick={() => syncGoogleCalendar(true)}
+                          disabled={isSyncingGCal}
+                          title="คลิกเพื่อเชื่อมต่อและดึงข้อมูลจาก Google Calendar"
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold transition-all shadow-2xs active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
+                        >
+                          <CalendarIcon className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span>{isSyncingGCal ? 'กำลังเชื่อม...' : 'ดึง Google Cal'}</span>
+                        </button>
+                      )}
                       {/* User Profile Avatar Pill */}
                       <div
                         className="flex items-center gap-1 px-2 py-1 rounded-xl bg-stone-100 border border-stone-200/80 text-xs font-medium text-stone-700 max-w-[120px] shrink-0"
@@ -1353,6 +1426,39 @@ export default function App() {
 
       {/* Main Content Area (Max width 4xl for optimal vertical mobile reading) */}
       <main className="flex-1 max-w-4xl w-full mx-auto p-2.5 sm:p-4 space-y-2.5">
+        {/* Prompt banner to connect Google Calendar if signed in but calendar scope not yet active */}
+        {user && !isViewOnly && !viewingFriend && !(gcalConnected && (token || getAccessToken())) && (
+          <aside
+            aria-label="Google Calendar connect prompt"
+            id="gcal-connect-prompt-banner"
+            className="flex flex-wrap items-center justify-between gap-3 p-3 sm:p-3.5 rounded-2xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 text-amber-900 dark:text-amber-200 text-xs shadow-2xs animate-in fade-in"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="p-2 rounded-xl bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300 shrink-0">
+                <CalendarIcon className="w-4 h-4" />
+              </div>
+              <div className="space-y-0.5 min-w-0">
+                <p className="font-bold text-xs text-amber-950 dark:text-amber-100">
+                  ต้องการดึงนัดหมายจาก Google Calendar ของคุณหรือไม่?
+                </p>
+                <p className="text-[11px] text-amber-800/90 dark:text-amber-300/90 leading-tight">
+                  เชื่อมต่อเพื่อให้ระบบดึงนัดหมายเดิม และซิงค์รายการใหม่เข้า Google Calendar อัตโนมัติ
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              id="banner-connect-gcal-btn"
+              onClick={() => syncGoogleCalendar(true)}
+              disabled={isSyncingGCal}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-colors shadow-2xs cursor-pointer shrink-0 ml-auto"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncingGCal ? 'animate-spin' : ''}`} />
+              <span>{isSyncingGCal ? 'กำลังเปิดหน้าต่าง...' : 'เชื่อมต่อ Google Calendar'}</span>
+            </button>
+          </aside>
+        )}
+
         {/* Calendar View (Month or Week) */}
         <div
           className={`rounded-2xl border p-2 sm:p-3 shadow-xs ${theme.cardBg} ${theme.cardBorder}`}
@@ -1561,6 +1667,19 @@ export default function App() {
         onRetryWithCalendar={() => handleGoogleLogin(true)}
         onRetryBasicAuth={() => handleGoogleLogin(false)}
         isRetrying={isSigningIn}
+      />
+
+      {/* Google Calendar Scope & API Enable Modal */}
+      <CalendarScopeModal
+        isOpen={isScopeModalOpen}
+        onClose={() => setIsScopeModalOpen(false)}
+        onGrantPermission={() => {
+          setIsScopeModalOpen(false);
+          syncGoogleCalendar(true);
+        }}
+        isConnecting={isSyncingGCal}
+        isApiDisabled={scopeModalApiDisabled}
+        apiEnableUrl={scopeModalApiUrl}
       />
     </div>
   );

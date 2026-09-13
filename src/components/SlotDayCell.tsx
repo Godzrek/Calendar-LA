@@ -2,7 +2,7 @@ import React from 'react';
 import { CalendarEvent, StickerPlacement, ThemeConfig, TimeSlot } from '../types';
 import { filterEventsBySlot } from '../utils/dateUtils';
 import { getDaySpecialInfo } from '../utils/thaiHolidays';
-import { Sparkles, Clock } from 'lucide-react';
+import { Sparkles, Clock, Plus } from 'lucide-react';
 
 interface SlotDayCellProps {
   dateKey: string;
@@ -33,6 +33,7 @@ export const SlotDayCell: React.FC<SlotDayCellProps> = ({
   stickers,
   isViewOnly,
   onSlotClick,
+  onAddEvent,
   onOpenStickers,
   onEventClick,
   onDaySelect,
@@ -181,12 +182,21 @@ export const SlotDayCell: React.FC<SlotDayCellProps> = ({
                 onDaySelect?.(dateKey);
                 if (hasEvent) {
                   onSlotClick(dateKey, slotKey, slotEventsList);
+                } else if (!isViewOnly && onAddEvent) {
+                  onAddEvent(dateKey, slotKey);
                 }
               }}
-              className={`relative flex-1 min-h-[20px] sm:min-h-[26px] rounded-md sm:rounded-lg p-0.5 px-1 sm:px-1.5 flex items-center justify-between border text-[10px] sm:text-[11px] transition-all select-none ${
+              title={
                 hasEvent
-                  ? `${config.activeBg} ${config.activeBorder} ${config.activeText} shadow-2xs font-medium cursor-pointer`
-                  : `${config.emptyBg} ${config.emptyBorder} opacity-80 cursor-pointer hover:opacity-100`
+                  ? `ดูนัดหมายช่วง${config.nameTh} (${slotEventsList.length} รายการ)`
+                  : isViewOnly
+                  ? `ช่วง${config.nameTh} (ว่าง)`
+                  : `ช่วง${config.nameTh} ว่าง - แตะเพื่อเพิ่มนัดหมาย`
+              }
+              className={`group/slot relative flex-1 min-h-[20px] sm:min-h-[26px] rounded-md sm:rounded-lg p-0.5 px-1 sm:px-1.5 flex items-center justify-between border text-[10px] sm:text-[11px] transition-all select-none cursor-pointer ${
+                hasEvent
+                  ? `${config.activeBg} ${config.activeBorder} ${config.activeText} shadow-2xs font-medium`
+                  : `${config.emptyBg} ${config.emptyBorder} opacity-75 hover:opacity-100 hover:border-amber-400 hover:ring-1 hover:ring-amber-300 dark:hover:ring-amber-600`
               }`}
             >
               {hasEvent ? (
@@ -206,8 +216,12 @@ export const SlotDayCell: React.FC<SlotDayCellProps> = ({
                   )}
                 </div>
               ) : (
-                /* Empty slot: clean minimalistic strip with soft color */
-                <span className="w-full h-1" />
+                /* Empty slot: clean minimalistic strip with soft color, reveals subtle plus icon on hover */
+                <div className="w-full flex items-center justify-center opacity-0 group-hover/slot:opacity-85 transition-opacity">
+                  {!isViewOnly && (
+                    <Plus className="w-2.5 h-2.5 text-stone-400 group-hover/slot:text-amber-600 dark:group-hover/slot:text-amber-400 stroke-[2.5]" />
+                  )}
+                </div>
               )}
             </div>
           );

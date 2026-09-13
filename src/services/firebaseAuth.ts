@@ -20,30 +20,46 @@ export const GOOGLE_CALENDAR_SCOPES = [
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
 
-// Initialize token from sessionStorage if available
+const TOKEN_KEY = 'gcal_access_token_v3';
+const EXPIRY_KEY = 'gcal_token_expires_at_v3';
+
+// Initialize token from localStorage/sessionStorage if available and not expired
 try {
   if (typeof window !== 'undefined') {
-    const stored = sessionStorage.getItem('gcal_access_token');
+    const stored = localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
+    const expiresAt = localStorage.getItem(EXPIRY_KEY) || sessionStorage.getItem(EXPIRY_KEY);
     if (stored) {
-      cachedAccessToken = stored;
+      if (expiresAt && Date.now() > Number(expiresAt)) {
+        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(EXPIRY_KEY);
+        sessionStorage.removeItem(TOKEN_KEY);
+        sessionStorage.removeItem(EXPIRY_KEY);
+      } else {
+        cachedAccessToken = stored;
+      }
     }
   }
 } catch {
-  // Ignore sessionStorage access errors
+  // Ignore storage access errors
 }
 
 export const getAccessToken = (): string | null => {
   if (cachedAccessToken) return cachedAccessToken;
   try {
     if (typeof window !== 'undefined') {
-      const stored = sessionStorage.getItem('gcal_access_token');
+      const stored = localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
+      const expiresAt = localStorage.getItem(EXPIRY_KEY) || sessionStorage.getItem(EXPIRY_KEY);
       if (stored) {
+        if (expiresAt && Date.now() > Number(expiresAt)) {
+          setAccessToken(null);
+          return null;
+        }
         cachedAccessToken = stored;
         return stored;
       }
     }
   } catch {
-    // Ignore sessionStorage access errors
+    // Ignore storage access errors
   }
   return null;
 };
@@ -53,13 +69,21 @@ export const setAccessToken = (token: string | null) => {
   try {
     if (typeof window !== 'undefined') {
       if (token) {
-        sessionStorage.setItem('gcal_access_token', token);
+        // Google OAuth access tokens are valid for 1 hour (3600s), set 3500s validity buffer
+        const expiresAt = String(Date.now() + 3500 * 1000);
+        localStorage.setItem(TOKEN_KEY, token);
+        localStorage.setItem(EXPIRY_KEY, expiresAt);
+        sessionStorage.setItem(TOKEN_KEY, token);
+        sessionStorage.setItem(EXPIRY_KEY, expiresAt);
       } else {
-        sessionStorage.removeItem('gcal_access_token');
+        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(EXPIRY_KEY);
+        sessionStorage.removeItem(TOKEN_KEY);
+        sessionStorage.removeItem(EXPIRY_KEY);
       }
     }
   } catch {
-    // Ignore sessionStorage access errors
+    // Ignore storage access errors
   }
 };
 
@@ -89,7 +113,8 @@ export interface GoogleSignInResult {
 
 // Sign in with Google (with or without calendar.events scope)
 export const googleSignIn = async (
-  includeCalendarScope: boolean = true
+  includeCalendarScope: boolean = true,
+  forceConsent: boolean = false
 ): Promise<GoogleSignInResult> => {
   try {
     isSigningIn = true;
@@ -98,7 +123,7 @@ export const googleSignIn = async (
       GOOGLE_CALENDAR_SCOPES.forEach((scope) => provider.addScope(scope));
     }
     provider.setCustomParameters({
-      prompt: 'select_account',
+      prompt: forceConsent || includeCalendarScope ? 'consent select_account' : 'select_account',
     });
 
     const result = await signInWithPopup(auth, provider);
@@ -133,6 +158,11 @@ export const googleSignIn = async (
   } finally {
     isSigningIn = false;
   }
+};
+
+// Re-request Google Calendar access with explicit consent prompt
+export const requestGoogleCalendarAccess = async (): Promise<GoogleSignInResult> => {
+  return googleSignIn(true, true);
 };
 
 export const googleSignOut = async (): Promise<void> => {

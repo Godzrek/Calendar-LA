@@ -2,7 +2,7 @@ import React from 'react';
 import { CalendarEvent, StickerPlacement, ThemeConfig, TimeSlot } from '../types';
 import { formatDateKey, formatThaiDate, THAI_FULL_DAYS, filterEventsBySlot } from '../utils/dateUtils';
 import { getDaySpecialInfo } from '../utils/thaiHolidays';
-import { Sparkles, Clock } from 'lucide-react';
+import { Sparkles, Clock, Plus } from 'lucide-react';
 
 interface WeekViewProps {
   currentDate: Date;
@@ -23,6 +23,7 @@ export const WeekView: React.FC<WeekViewProps> = ({
   stickers,
   isViewOnly,
   onSlotClick,
+  onAddEvent,
   onOpenStickers,
   onEventClick,
 }) => {
@@ -149,12 +150,21 @@ export const WeekView: React.FC<WeekViewProps> = ({
                     onClick={() => {
                       if (hasEvent) {
                         onSlotClick(day.dateKey, slotKey, slotEvents);
+                      } else if (!isViewOnly && onAddEvent) {
+                        onAddEvent(day.dateKey, slotKey);
                       }
                     }}
-                    className={`rounded-xl border p-2 flex flex-col justify-between transition-all min-h-[64px] ${
+                    title={
                       hasEvent
-                        ? `${conf.activeBg} ${conf.activeBorder} ${conf.activeText} shadow-2xs cursor-pointer`
-                        : `${conf.emptyBg} ${conf.emptyBorder} opacity-75`
+                        ? `ดูนัดหมายช่วง${conf.nameTh} (${slotEvents.length} รายการ)`
+                        : isViewOnly
+                        ? `ช่วง${conf.nameTh} (ว่าง)`
+                        : `ช่วง${conf.nameTh} ว่าง - แตะเพื่อเพิ่มนัดหมาย`
+                    }
+                    className={`group/week-slot rounded-xl border p-2 flex flex-col justify-between transition-all min-h-[64px] cursor-pointer ${
+                      hasEvent
+                        ? `${conf.activeBg} ${conf.activeBorder} ${conf.activeText} shadow-2xs`
+                        : `${conf.emptyBg} ${conf.emptyBorder} opacity-75 hover:opacity-100 hover:border-amber-400 hover:ring-1 hover:ring-amber-300 dark:hover:ring-amber-600`
                     }`}
                   >
                     <div className="flex items-center justify-between text-xs mb-1">
@@ -181,7 +191,14 @@ export const WeekView: React.FC<WeekViewProps> = ({
                         ))}
                       </div>
                     ) : (
-                      <div className="h-2" />
+                      <div className="h-4 flex items-center justify-center">
+                        {!isViewOnly && (
+                          <span className="text-[10px] opacity-0 group-hover/week-slot:opacity-100 flex items-center gap-0.5 font-medium text-amber-600 dark:text-amber-400 transition-opacity">
+                            <Plus className="w-3 h-3 stroke-[2.5]" />
+                            <span>แตะเพื่อเพิ่มนัด</span>
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                 );

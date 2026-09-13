@@ -8,6 +8,36 @@ export class InsufficientScopeError extends Error {
   }
 }
 
+export class ApiDisabledError extends Error {
+  code = 'API_DISABLED';
+  enableUrl?: string;
+  constructor(message: string, enableUrl?: string) {
+    super(message);
+    this.name = 'ApiDisabledError';
+    this.enableUrl = enableUrl;
+  }
+}
+
+function handleCalendarApiError(status: number, errText: string) {
+  if (
+    errText.includes('has not been used in project') ||
+    errText.includes('it is disabled') ||
+    errText.includes('SERVICE_DISABLED')
+  ) {
+    const match = errText.match(/https:\/\/[^\s"'\\]+/);
+    const enableUrl =
+      match && match[0].includes('console')
+        ? match[0]
+        : 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com?project=calendar-la-19279';
+    throw new ApiDisabledError(`Google Calendar API is not enabled: ${errText}`, enableUrl);
+  }
+
+  if (status === 401 || status === 403) {
+    throw new InsufficientScopeError(`Insufficient Google Calendar scopes (${status}): ${errText}`);
+  }
+  throw new Error(`Google Calendar error (${status}): ${errText}`);
+}
+
 export function categorizeTimeToSlot(timeStr: string): TimeSlot {
   // timeStr is expected in HH:mm
   if (!timeStr) return 'morning';
@@ -17,6 +47,21 @@ export function categorizeTimeToSlot(timeStr: string): TimeSlot {
   if (hour < 12) return 'morning';
   if (hour < 17) return 'afternoon';
   return 'evening';
+}
+
+export function calculateEventSlots(startTime: string, endTime: string, isAllDay: boolean): TimeSlot[] {
+  if (isAllDay) {
+    return ['morning', 'afternoon', 'evening'];
+  }
+  const startHour = parseInt(startTime.split(':')[0], 10) || 9;
+  const endHour = parseInt(endTime.split(':')[0], 10) || startHour + 1;
+  const slots: TimeSlot[] = [];
+
+  if (startHour < 12) slots.push('morning');
+  if (startHour < 17 && endHour >= 12) slots.push('afternoon');
+  if (endHour >= 17 || startHour >= 17) slots.push('evening');
+
+  return slots.length > 0 ? slots : [categorizeTimeToSlot(startTime)];
 }
 
 export function parseGoogleDateTime(dateTimeStr?: string, dateStr?: string): { date: string; time: string } {
@@ -52,46 +97,59 @@ export async function fetchGoogleCalendarEvents(
   timeMinISO: string,
   timeMaxISO: string
 ): Promise<CalendarEvent[]> {
-  const url = new URL('https://www.googleapis.com/calendar/v3/calendars/primary/events');
-  url.searchParams.set('timeMin', timeMinISO);
-  url.searchParams.set('timeMax', timeMaxISO);
-  url.searchParams.set('singleEvents', 'true');
-  url.searchParams.set('orderBy', 'startTime');
-  url.searchParams.set('maxResults', '250');
+  let allItems: any[] = [];
+  let pageToken: string | null = null;
 
-  const response = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    if (response.status === 401 || response.status === 403) {
-      throw new InsufficientScopeError(`Insufficient Google Calendar scopes (${response.status}): ${errText}`);
+  do {
+    const url = new URL('https://www.googleapis.com/calendar/v3/calendars/primary/events');
+    url.searchParams.set('timeMin', timeMinISO);
+    url.searchParams.set('timeMax', timeMaxISO);
+    url.searchParams.set('singleEvents', 'true');
+    url.searchParams.set('orderBy', 'startTime');
+    url.searchParams.set('maxResults', '2500');
+    if (pageToken) {
+      url.searchParams.set('pageToken', pageToken);
     }
-    throw new Error(`Google Calendar error (${response.status}): ${errText}`);
-  }
 
-  const data = await response.json();
-  const items = data.items || [];
+    const response = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+      },
+    });
 
-  return items.map((item: any): CalendarEvent => {
+    if (!response.ok) {
+      const errText = await response.text();
+      handleCalendarApiError(response.status, errText);
+    }
+
+    const data = await response.json();
+    const items = data.items || [];
+    allItems = allItems.concat(items);
+    pageToken = data.nextPageToken || null;
+  } while (pageToken);
+
+  // Filter out deleted/cancelled events
+  const activeItems = allItems.filter((item: any) => item.status !== 'cancelled');
+
+  return activeItems.map((item: any): CalendarEvent => {
+    const isAllDay = !item.start?.dateTime && !!item.start?.date;
     const startParsed = parseGoogleDateTime(item.start?.dateTime, item.start?.date);
     const endParsed = parseGoogleDateTime(item.end?.dateTime, item.end?.date);
     const slot = categorizeTimeToSlot(startParsed.time);
+    const slots = calculateEventSlots(startParsed.time, endParsed.time, isAllDay);
 
     return {
       id: `gcal-${item.id}`,
       googleEventId: item.id,
-      title: item.summary || '(No title)',
+      title: item.summary || '(ไม่มีชื่อนัดหมาย)',
       description: item.description || '',
       location: item.location || '',
       date: startParsed.date,
       slot: slot,
-      startTime: startParsed.time,
-      endTime: endParsed.time,
+      slots: slots,
+      startTime: isAllDay ? '09:00' : startParsed.time,
+      endTime: isAllDay ? '18:00' : endParsed.time,
       isGoogleEvent: true,
       color: item.colorId,
     };
@@ -140,10 +198,7 @@ export async function createGoogleCalendarEvent(
 
   if (!response.ok) {
     const errText = await response.text();
-    if (response.status === 401 || response.status === 403) {
-      throw new InsufficientScopeError(`Insufficient Google Calendar scopes (${response.status}): ${errText}`);
-    }
-    throw new Error(`Failed to create Google Calendar event: ${errText}`);
+    handleCalendarApiError(response.status, errText);
   }
 
   const created = await response.json();
@@ -166,10 +221,7 @@ export async function deleteGoogleCalendarEvent(
 
   if (!response.ok && response.status !== 404) {
     const errText = await response.text();
-    if (response.status === 401 || response.status === 403) {
-      throw new InsufficientScopeError(`Insufficient Google Calendar scopes (${response.status}): ${errText}`);
-    }
-    throw new Error(`Failed to delete Google Calendar event: ${errText}`);
+    handleCalendarApiError(response.status, errText);
   }
 }
 
@@ -218,9 +270,6 @@ export async function updateGoogleCalendarEvent(
 
   if (!response.ok && response.status !== 404) {
     const errText = await response.text();
-    if (response.status === 401 || response.status === 403) {
-      throw new InsufficientScopeError(`Insufficient Google Calendar scopes (${response.status}): ${errText}`);
-    }
-    throw new Error(`Failed to update Google Calendar event: ${errText}`);
+    handleCalendarApiError(response.status, errText);
   }
 }
