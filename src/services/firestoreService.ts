@@ -105,6 +105,7 @@ export interface UserProfileData {
   photoURL?: string;
   themeId?: string;
   updatedAt: string;
+  lastSyncedAt?: string;
 }
 
 // Save/Update user profile in Firestore
@@ -321,6 +322,135 @@ export async function getSharedStickers(userId: string): Promise<StickerPlacemen
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
   }
+}
+
+// -------------------------------------------------------------
+// Consolidated Calendar Snapshot (Fast, Single-Document Cache)
+// -------------------------------------------------------------
+export interface CalendarSnapshot {
+  events: CalendarEvent[];
+  stickers: StickerPlacement[];
+  themeId?: string;
+  ownerName?: string;
+  lastSyncedAt: string; // ISO string timestamp
+  eventCount: number;
+  stickerCount: number;
+}
+
+// Save complete calendar snapshot to database
+export async function saveCalendarSnapshot(
+  userId: string,
+  data: {
+    events: CalendarEvent[];
+    stickers: StickerPlacement[];
+    themeId?: string;
+    ownerName?: string;
+  }
+): Promise<string> {
+  const nowISO = new Date().toISOString();
+  try {
+    const docRef = doc(db, 'users', userId, 'calendarData', 'snapshot');
+    const snapshotData = {
+      events: data.events || [],
+      stickers: data.stickers || [],
+      themeId: data.themeId,
+      ownerName: data.ownerName,
+      lastSyncedAt: nowISO,
+      eventCount: (data.events || []).length,
+      stickerCount: (data.stickers || []).length,
+      userId,
+    };
+    await setDoc(docRef, snapshotData, { merge: true });
+
+    // Also update lastSyncedAt & metadata on user's profile document
+    const userDocRef = doc(db, 'users', userId);
+    await setDoc(
+      userDocRef,
+      {
+        lastSyncedAt: nowISO,
+        eventCount: (data.events || []).length,
+        stickerCount: (data.stickers || []).length,
+        updatedAt: nowISO,
+        ...(data.themeId ? { themeId: data.themeId } : {}),
+        ...(data.ownerName ? { displayName: data.ownerName } : {}),
+      },
+      { merge: true }
+    );
+    return nowISO;
+  } catch (error) {
+    console.warn('saveCalendarSnapshot notice:', error);
+    return nowISO;
+  }
+}
+
+// Get consolidated calendar snapshot from database (atomic single-document read)
+export async function getCalendarSnapshot(userId: string): Promise<CalendarSnapshot | null> {
+  try {
+    const docRef = doc(db, 'users', userId, 'calendarData', 'snapshot');
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      return {
+        events: Array.isArray(data.events) ? data.events : [],
+        stickers: Array.isArray(data.stickers) ? data.stickers : [],
+        themeId: data.themeId,
+        ownerName: data.ownerName,
+        lastSyncedAt: data.lastSyncedAt || '',
+        eventCount: data.eventCount || 0,
+        stickerCount: data.stickerCount || 0,
+      };
+    }
+
+    // Fallback if snapshot document hasn't been written yet: read subcollections
+    const [events, stickers] = await Promise.all([
+      getSharedEvents(userId).catch(() => [] as CalendarEvent[]),
+      getSharedStickers(userId).catch(() => [] as StickerPlacement[]),
+    ]);
+
+    if ((events && events.length > 0) || (stickers && stickers.length > 0)) {
+      return {
+        events: events || [],
+        stickers: stickers || [],
+        lastSyncedAt: '',
+        eventCount: (events || []).length,
+        stickerCount: (stickers || []).length,
+      };
+    }
+    return null;
+  } catch (error) {
+    console.warn('getCalendarSnapshot notice:', error);
+    return null;
+  }
+}
+
+// Real-time listener for calendar snapshot
+export function subscribeToCalendarSnapshot(
+  userId: string,
+  onUpdate: (snapshot: CalendarSnapshot) => void,
+  onError?: (err: any) => void
+): Unsubscribe {
+  const docRef = doc(db, 'users', userId, 'calendarData', 'snapshot');
+  return onSnapshot(
+    docRef,
+    (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        onUpdate({
+          events: Array.isArray(data.events) ? data.events : [],
+          stickers: Array.isArray(data.stickers) ? data.stickers : [],
+          themeId: data.themeId,
+          ownerName: data.ownerName,
+          lastSyncedAt: data.lastSyncedAt || '',
+          eventCount: data.eventCount || 0,
+          stickerCount: data.stickerCount || 0,
+        });
+      }
+    },
+    (error) => {
+      console.warn('subscribeToCalendarSnapshot notice:', error);
+      if (onError) onError(error);
+    }
+  );
 }
 
 // Real-time listener for friends list

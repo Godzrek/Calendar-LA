@@ -48,6 +48,12 @@ service cloud.firestore {
         allow delete: if isOwner(userId);
       }
 
+      // Shared calendar snapshot document (consolidated database cache with lastSyncedAt)
+      match /calendarData/{docId} {
+        allow get, list: if true;
+        allow create, update, delete: if isOwner(userId);
+      }
+
       // Friends subcollection
       match /friends/{friendId} {
         // Only the owner can view and manage their friends list

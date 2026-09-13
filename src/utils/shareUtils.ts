@@ -62,7 +62,8 @@ export function generateShareUrl(
   stickers: StickerPlacement[],
   themeId: string,
   ownerName: string,
-  ownerUid?: string
+  ownerUid?: string,
+  lastSyncedAt?: string
 ): string {
   const currentUrl = new URL(window.location.origin + window.location.pathname);
   currentUrl.searchParams.set('mode', 'readonly');
@@ -83,6 +84,7 @@ export function generateShareUrl(
     version: 1,
     ownerName: resolvedOwner,
     sharedAt: new Date().toISOString(),
+    lastSyncedAt: lastSyncedAt || new Date().toISOString(),
     themeId,
     events: events.map((e) => ({
       id: e.id,

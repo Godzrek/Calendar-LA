@@ -7,6 +7,7 @@ import {
   THAI_MONTHS,
   formatYearThai,
   formatDateKey,
+  formatLastUpdatedThai,
 } from './utils/dateUtils';
 import {
   initAuth,
@@ -44,6 +45,10 @@ import {
   getSharedEvents,
   getSharedStickers,
   subscribeToFriends,
+  saveCalendarSnapshot,
+  getCalendarSnapshot,
+  subscribeToCalendarSnapshot,
+  CalendarSnapshot,
 } from './services/firestoreService';
 import { MonthView } from './components/MonthView';
 import { WeekView } from './components/WeekView';
@@ -80,12 +85,14 @@ import {
   Edit3,
   Check,
   X,
+  Clock,
 } from 'lucide-react';
 
 const STORAGE_EVENTS_KEY = 'slot_calendar_events_v2';
 const STORAGE_STICKERS_KEY = 'slot_calendar_stickers_v2';
 const STORAGE_THEME_KEY = 'slot_calendar_theme_id_v2';
 const STORAGE_OWNER_NAME_KEY = 'slot_calendar_owner_name_v2';
+const STORAGE_LAST_SYNCED_KEY = 'slot_calendar_last_synced_at_v2';
 
 export default function App() {
   // Navigation Date
@@ -127,6 +134,16 @@ export default function App() {
   const [tempOwnerName, setTempOwnerName] = useState('');
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
+
+  // Last Synced / Saved Timestamp from Firestore database
+  const [lastSyncedAt, setLastSyncedAt] = useState<string>(() => {
+    return (
+      initialShare.sharedState?.lastSyncedAt ||
+      (typeof window !== 'undefined'
+        ? localStorage.getItem(STORAGE_LAST_SYNCED_KEY) || ''
+        : '')
+    );
+  });
 
   // Events & Stickers State - initialized with shared data instantly if available
   const [events, setEvents] = useState<CalendarEvent[]>(() => {
@@ -193,6 +210,15 @@ export default function App() {
     }, 3500);
   };
 
+  // Schedule Owner Name logic: follows user owner -> [Name] Calendar
+  const calendarOwnerName = viewingFriend
+    ? viewingFriend.displayName || viewingFriend.email?.split('@')[0] || 'เพื่อน'
+    : isViewOnly
+    ? sharedOwnerName || 'เพื่อน'
+    : customOwnerName || user?.displayName || user?.email?.split('@')[0] || 'My';
+
+  const calendarHeaderTitle = `${calendarOwnerName} Calendar`;
+
   // Shared calendar fetch/refresh logic for view-only mode
   const loadSharedCalendarData = useCallback(
     async (isManualRefresh = false) => {
@@ -233,9 +259,13 @@ export default function App() {
       // 1. Immediately apply any pre-bundled payload so the calendar renders with zero wait
       if (sharedState) {
         applySharedData(sharedState.events || [], sharedState.stickers || []);
+        if (sharedState.lastSyncedAt) {
+          setLastSyncedAt(sharedState.lastSyncedAt);
+          localStorage.setItem(STORAGE_LAST_SYNCED_KEY, sharedState.lastSyncedAt);
+        }
       }
 
-      // 2. If a Firebase owner UID is provided in the URL, load live updates from Firestore with a strict 4.5s timeout
+      // 2. If a Firebase owner UID is provided in the URL, load live updates from Firestore database snapshot with a 3.5s timeout
       if (calOwnerUid) {
         setIsSharedLoading(true);
 
@@ -248,52 +278,65 @@ export default function App() {
             if (profile?.themeId) {
               setTheme(getThemeById(profile.themeId));
             }
+            if (profile?.lastSyncedAt && !lastSyncedAt) {
+              setLastSyncedAt(profile.lastSyncedAt);
+              localStorage.setItem(STORAGE_LAST_SYNCED_KEY, profile.lastSyncedAt);
+            }
           })
           .catch((err) => console.warn('Could not fetch owner profile:', err));
 
         try {
           // Timeout promise: prevent getting stuck in an endless spinner if network/Firestore is latent
           const timeoutPromise = new Promise<{ isTimeout: true }>((resolve) =>
-            setTimeout(() => resolve({ isTimeout: true }), 4500)
+            setTimeout(() => resolve({ isTimeout: true }), 3500)
           );
 
-          const fetchPromise = Promise.all([
-            getSharedEvents(calOwnerUid).catch((err) => {
-              console.warn('getSharedEvents notice:', err);
-              return [] as CalendarEvent[];
-            }),
-            getSharedStickers(calOwnerUid).catch((err) => {
-              console.warn('getSharedStickers notice:', err);
-              return [] as StickerPlacement[];
-            }),
-          ]);
-
+          const fetchPromise = getCalendarSnapshot(calOwnerUid);
           const raceResult = await Promise.race([fetchPromise, timeoutPromise]);
 
           if ('isTimeout' in raceResult) {
-            console.warn('Firestore live fetch timed out; using existing data');
+            console.warn('Firestore live snapshot fetch timed out; using existing data');
             if (isManualRefresh) {
-              showToast('การเชื่อมต่อคลาวด์ใช้เวลานาน ได้แสดงข้อมูลล่าสุดที่พร้อมใช้งาน');
+              const timeNotice = lastSyncedAt
+                ? ` (ข้อมูล ณ ${formatLastUpdatedThai(lastSyncedAt)})`
+                : '';
+              showToast(`การเชื่อมต่อใช้เวลานาน ได้แสดงข้อมูลล่าสุดที่พร้อมใช้งาน${timeNotice}`);
             }
-          } else {
-            const [cloudEvents, cloudStickers] = raceResult;
+          } else if (raceResult) {
+            const snapshot = raceResult;
             const finalEvents =
-              cloudEvents && cloudEvents.length > 0
-                ? cloudEvents
+              snapshot.events && snapshot.events.length > 0
+                ? snapshot.events
                 : sharedState?.events && sharedState.events.length > 0
                 ? sharedState.events
                 : [];
             const finalStickers =
-              cloudStickers && cloudStickers.length > 0
-                ? cloudStickers
+              snapshot.stickers && snapshot.stickers.length > 0
+                ? snapshot.stickers
                 : sharedState?.stickers && sharedState.stickers.length > 0
                 ? sharedState.stickers
                 : [];
 
             applySharedData(finalEvents, finalStickers);
 
+            if (snapshot.lastSyncedAt) {
+              setLastSyncedAt(snapshot.lastSyncedAt);
+              localStorage.setItem(STORAGE_LAST_SYNCED_KEY, snapshot.lastSyncedAt);
+            }
+            if (snapshot.ownerName) {
+              setSharedOwnerName(snapshot.ownerName);
+            }
+            if (snapshot.themeId) {
+              setTheme(getThemeById(snapshot.themeId));
+            }
+
             if (isManualRefresh) {
-              showToast(`รีเฟรชข้อมูลปฏิทินของ ${name} สำเร็จ (พบนัดหมาย ${finalEvents.length} รายการ)`);
+              const timeNotice = snapshot.lastSyncedAt
+                ? ` (ข้อมูล ณ ${formatLastUpdatedThai(snapshot.lastSyncedAt)})`
+                : '';
+              showToast(
+                `รีเฟรชข้อมูลปฏิทินของ ${name} สำเร็จ (พบนัดหมาย ${finalEvents.length} รายการ)${timeNotice}`
+              );
             }
           }
         } catch (err) {
@@ -302,7 +345,10 @@ export default function App() {
             applySharedData(sharedState.events || [], sharedState.stickers || []);
           }
           if (isManualRefresh) {
-            showToast('รีเฟรชข้อมูลเรียบร้อย');
+            const timeNotice = lastSyncedAt
+              ? ` (ข้อมูล ณ ${formatLastUpdatedThai(lastSyncedAt)})`
+              : '';
+            showToast(`รีเฟรชข้อมูลเรียบร้อย${timeNotice}`);
           }
         } finally {
           setIsSharedLoading(false);
@@ -311,12 +357,40 @@ export default function App() {
         setIsFirestoreConnected(true);
       } else if (sharedState) {
         if (isManualRefresh) {
-          showToast('รีเฟรชข้อมูลปฏิทินเรียบร้อย');
+          const timeNotice = sharedState.lastSyncedAt
+            ? ` (ข้อมูล ณ ${formatLastUpdatedThai(sharedState.lastSyncedAt)})`
+            : '';
+          showToast(`รีเฟรชข้อมูลปฏิทินเรียบร้อย${timeNotice}`);
         }
       }
     },
-    [currentDate]
+    [currentDate, lastSyncedAt]
   );
+
+  // Live real-time snapshot subscription for view-only mode
+  useEffect(() => {
+    const { isViewOnly: viewOnlyFromUrl, calOwnerUid } = checkIsViewOnlyFromUrl();
+    if (!viewOnlyFromUrl || !calOwnerUid) return;
+
+    const unsubscribe = subscribeToCalendarSnapshot(
+      calOwnerUid,
+      (snapshot) => {
+        if (snapshot) {
+          if (snapshot.events) setEvents(snapshot.events);
+          if (snapshot.stickers) setStickers(snapshot.stickers);
+          if (snapshot.lastSyncedAt) {
+            setLastSyncedAt(snapshot.lastSyncedAt);
+            localStorage.setItem(STORAGE_LAST_SYNCED_KEY, snapshot.lastSyncedAt);
+          }
+          if (snapshot.ownerName) setSharedOwnerName(snapshot.ownerName);
+          if (snapshot.themeId) setTheme(getThemeById(snapshot.themeId));
+        }
+      },
+      (err) => console.warn('Shared calendar real-time snapshot listener notice:', err)
+    );
+
+    return () => unsubscribe();
+  }, []);
 
   // Safety fallback: ensure isSharedLoading is never stuck longer than 5 seconds under any circumstance
   useEffect(() => {
@@ -441,6 +515,27 @@ export default function App() {
   useEffect(() => {
     if (!user || isViewOnly) return;
 
+    // 0. Fetch initial database snapshot immediately so user sees existing data with zero latency
+    getCalendarSnapshot(user.uid)
+      .then((snapshot) => {
+        if (snapshot) {
+          if (snapshot.events && snapshot.events.length > 0) {
+            setEvents((prev) => deduplicateEvents([...snapshot.events, ...prev]));
+          }
+          if (snapshot.stickers && snapshot.stickers.length > 0) {
+            setStickers(snapshot.stickers);
+          }
+          if (snapshot.themeId) {
+            setTheme(getThemeById(snapshot.themeId));
+          }
+          if (snapshot.lastSyncedAt) {
+            setLastSyncedAt(snapshot.lastSyncedAt);
+            localStorage.setItem(STORAGE_LAST_SYNCED_KEY, snapshot.lastSyncedAt);
+          }
+        }
+      })
+      .catch((err) => console.warn('Snapshot initial load error:', err));
+
     // 1. Update/Save user profile in Firestore
     saveUserProfile({
       uid: user.uid,
@@ -505,16 +600,30 @@ export default function App() {
         if (!isCancelled) {
           setEvents((prev) => {
             const nonGoogle = prev.filter((e) => !e.isGoogleEvent);
-            return deduplicateEvents([...nonGoogle, ...gEvents]);
+            const combined = deduplicateEvents([...nonGoogle, ...gEvents]);
+            if (user) {
+              saveCalendarSnapshot(user.uid, {
+                events: combined,
+                stickers,
+                themeId: theme.id,
+                ownerName: calendarOwnerName !== 'My' ? calendarOwnerName : (user.displayName || 'เจ้าของปฏิทิน'),
+              })
+                .then((nowISO) => {
+                  setLastSyncedAt(nowISO);
+                  localStorage.setItem(STORAGE_LAST_SYNCED_KEY, nowISO);
+                })
+                .catch(console.warn);
+
+              syncAllEventsToFirestore(user.uid, gEvents).catch(console.warn);
+            }
+            return combined;
           });
-          if (user) {
-            syncAllEventsToFirestore(user.uid, gEvents).catch(console.warn);
-          }
           setGcalConnected(true);
         }
       } catch (err: any) {
         if (!isCancelled) {
           console.warn('Google Calendar auto-fetch notice:', err);
+          // On fetch failure, existing database-backed events remain displayed!
           if (
             err instanceof InsufficientScopeError ||
             err?.message?.includes('insufficient') ||
@@ -534,7 +643,7 @@ export default function App() {
     return () => {
       isCancelled = true;
     };
-  }, [token, currentDate.getFullYear(), currentDate.getMonth(), isViewOnly]);
+  }, [token, currentDate.getFullYear(), currentDate.getMonth(), isViewOnly, user]);
 
   // Subscribe to viewing friend's live events & stickers
   useEffect(() => {
@@ -639,17 +748,28 @@ export default function App() {
 
         const gEvents = await fetchGoogleCalendarEvents(accessToken, timeMin, timeMax);
 
+        let finalEvents: CalendarEvent[] = [];
         setEvents((prev) => {
           const nonGoogle = prev.filter((e) => !e.isGoogleEvent);
-          return deduplicateEvents([...nonGoogle, ...gEvents]);
+          finalEvents = deduplicateEvents([...nonGoogle, ...gEvents]);
+          return finalEvents;
         });
 
         if (user) {
+          const nowISO = await saveCalendarSnapshot(user.uid, {
+            events: finalEvents.length > 0 ? finalEvents : gEvents,
+            stickers,
+            themeId: theme.id,
+            ownerName: calendarOwnerName !== 'My' ? calendarOwnerName : (user.displayName || 'เจ้าของปฏิทิน'),
+          });
+          setLastSyncedAt(nowISO);
+          localStorage.setItem(STORAGE_LAST_SYNCED_KEY, nowISO);
           syncAllEventsToFirestore(user.uid, gEvents).catch(console.warn);
         }
 
         setGcalConnected(true);
-        showToast(`ดึงข้อมูล Google Calendar สำเร็จ (พบนัดหมาย ${gEvents.length} รายการ)`);
+        const timeNotice = ` (อัปเดตล่าสุด: ${formatLastUpdatedThai(new Date().toISOString())})`;
+        showToast(`ดึงข้อมูล Google Calendar และบันทึกลงฐานข้อมูลสำเร็จ (พบนัดหมาย ${gEvents.length} รายการ)${timeNotice}`);
       } catch (err: any) {
         console.warn('Google Calendar sync notice:', err);
         if (err instanceof ApiDisabledError) {
@@ -668,13 +788,16 @@ export default function App() {
           setScopeModalApiDisabled(false);
           setIsScopeModalOpen(true);
         } else {
-          showToast('ไม่สามารถดึงข้อมูลจาก Google Calendar ได้');
+          const fallbackMsg = lastSyncedAt
+            ? `ไม่สามารถดึงข้อมูลใหม่จาก Google Calendar ได้ จึงแสดงข้อมูลล่าสุดจากฐานข้อมูล (ข้อมูล ณ ${formatLastUpdatedThai(lastSyncedAt)})`
+            : 'ไม่สามารถดึงข้อมูลจาก Google Calendar ได้ แสดงข้อมูลเดิมที่มีอยู่ในฐานข้อมูล';
+          showToast(fallbackMsg);
         }
       } finally {
         setIsSyncingGCal(false);
       }
     },
-    [token, currentDate]
+    [token, currentDate, user, stickers, theme.id, calendarOwnerName, lastSyncedAt]
   );
 
   // Handle Google Login
@@ -827,6 +950,29 @@ export default function App() {
     setAddModalOpen(true);
   };
 
+  // Helper to persist snapshot to Firestore database
+  const persistSnapshot = useCallback(
+    async (evts: CalendarEvent[], stks: StickerPlacement[], customThemeId?: string) => {
+      if (!user || isViewOnly) return;
+      try {
+        const nowISO = await saveCalendarSnapshot(user.uid, {
+          events: evts,
+          stickers: stks,
+          themeId: customThemeId || theme.id,
+          ownerName:
+            calendarOwnerName !== 'My'
+              ? calendarOwnerName
+              : user.displayName || 'เจ้าของปฏิทิน',
+        });
+        setLastSyncedAt(nowISO);
+        localStorage.setItem(STORAGE_LAST_SYNCED_KEY, nowISO);
+      } catch (err) {
+        console.warn('persistSnapshot notice:', err);
+      }
+    },
+    [user, isViewOnly, theme.id, calendarOwnerName]
+  );
+
   const handleUpdateEvent = async (
     eventId: string,
     eventData: Partial<CalendarEvent>,
@@ -899,7 +1045,9 @@ export default function App() {
       isGoogleEvent: !!(googleEventId || existing.googleEventId),
     };
 
-    setEvents((prev) => deduplicateEvents(prev.map((e) => (e.id === eventId ? updatedEvent : e))));
+    const nextEvents = deduplicateEvents(events.map((e) => (e.id === eventId ? updatedEvent : e)));
+    setEvents(nextEvents);
+    persistSnapshot(nextEvents, stickers);
 
     // Save to Firestore Calendar-LA if user is signed in
     if (user) {
@@ -955,7 +1103,9 @@ export default function App() {
       isGoogleEvent: !!googleEventId,
     };
 
-    setEvents((prev) => deduplicateEvents([...prev, newEvent]));
+    const nextEvents = deduplicateEvents([...events, newEvent]);
+    setEvents(nextEvents);
+    persistSnapshot(nextEvents, stickers);
 
     // Save to Firestore Calendar-LA if user is signed in
     if (user) {
@@ -995,7 +1145,9 @@ export default function App() {
       }
     }
 
-    setEvents((prev) => prev.filter((e) => e.id !== event.id));
+    const nextEvents = events.filter((e) => e.id !== event.id);
+    setEvents(nextEvents);
+    persistSnapshot(nextEvents, stickers);
 
     // Delete from Firestore Calendar-LA if user is signed in
     if (user) {
@@ -1036,7 +1188,9 @@ export default function App() {
       createdAt: Date.now(),
     };
 
-    setStickers((prev) => [...prev, newSticker]);
+    const nextStickers = [...stickers, newSticker];
+    setStickers(nextStickers);
+    persistSnapshot(events, nextStickers);
 
     // Save to Firestore Calendar-LA if user is signed in
     if (user) {
@@ -1051,7 +1205,9 @@ export default function App() {
   const handleRemoveSticker = (stickerId: string) => {
     if (isViewOnly || viewingFriend) return;
 
-    setStickers((prev) => prev.filter((s) => s.id !== stickerId));
+    const nextStickers = stickers.filter((s) => s.id !== stickerId);
+    setStickers(nextStickers);
+    persistSnapshot(events, nextStickers);
 
     // Delete from Firestore Calendar-LA if user is signed in
     if (user) {
@@ -1096,19 +1252,29 @@ export default function App() {
     setIsEditingOwnerName(false);
   };
 
-  // Schedule Owner Name logic: follows user owner -> [Name] Calendar
-  const calendarOwnerName = viewingFriend
-    ? (viewingFriend.displayName || viewingFriend.email?.split('@')[0] || 'เพื่อน')
-    : isViewOnly
-    ? (sharedOwnerName || 'เพื่อน')
-    : (customOwnerName || user?.displayName || user?.email?.split('@')[0] || 'My');
-
-  const calendarHeaderTitle = `${calendarOwnerName} Calendar`;
-
   // Share Handler (generates read-only link for friends)
-  const handleOpenShareModal = () => {
-    // If user is logged in, sync all current events to Firestore right before sharing
+  const handleOpenShareModal = async () => {
+    let syncedAtIso = lastSyncedAt;
+
+    // If user is logged in, sync all current events to Firestore snapshot right before sharing
     if (user) {
+      try {
+        const nowISO = await saveCalendarSnapshot(user.uid, {
+          events,
+          stickers,
+          themeId: theme.id,
+          ownerName:
+            calendarOwnerName !== 'My'
+              ? calendarOwnerName
+              : user.displayName || 'เจ้าของปฏิทิน',
+        });
+        syncedAtIso = nowISO;
+        setLastSyncedAt(nowISO);
+        localStorage.setItem(STORAGE_LAST_SYNCED_KEY, nowISO);
+      } catch (e) {
+        console.warn('Snapshot pre-share save error:', e);
+      }
+
       saveUserProfile({
         uid: user.uid,
         email: user.email || '',
@@ -1126,7 +1292,8 @@ export default function App() {
       stickers,
       theme.id,
       calendarOwnerName !== 'My' ? calendarOwnerName : (user?.displayName || 'เจ้าของปฏิทิน'),
-      user?.uid
+      user?.uid,
+      syncedAtIso || new Date().toISOString()
     );
     setShareUrl(url);
     setIsShareModalOpen(true);
@@ -1137,6 +1304,7 @@ export default function App() {
     setTheme(newTheme);
     if (!isViewOnly) {
       localStorage.setItem(STORAGE_THEME_KEY, newTheme.id);
+      persistSnapshot(events, stickers, newTheme.id);
       if (user) {
         saveUserProfile({
           uid: user.uid,
@@ -1169,17 +1337,25 @@ export default function App() {
           id="view-only-banner"
           className="bg-stone-900 text-white px-3.5 py-2.5 text-xs flex flex-wrap items-center justify-between gap-3 border-b border-stone-800 shadow-sm"
         >
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2.5 min-w-0">
             <div className="p-1 rounded-md bg-amber-500/20 text-amber-400 shrink-0">
               <Eye className="w-4 h-4" />
             </div>
-            <div className="truncate">
-              <span className="font-bold text-amber-300">
-                โหมดดูอย่างเดียว (Read-Only):
-              </span>{' '}
-              <span className="text-stone-200">
-                คุณกำลังดูปฏิทินของ <strong>{sharedOwnerName}</strong> (ไม่สามารถแก้ไขหรือลบได้)
-              </span>
+            <div className="min-w-0">
+              <div className="truncate">
+                <span className="font-bold text-amber-300">
+                  โหมดดูอย่างเดียว (Read-Only):
+                </span>{' '}
+                <span className="text-stone-200">
+                  คุณกำลังดูปฏิทินของ <strong>{sharedOwnerName}</strong> (ไม่สามารถแก้ไขหรือลบได้)
+                </span>
+              </div>
+              {lastSyncedAt && (
+                <div className="flex items-center gap-1 text-[11px] text-amber-300/90 mt-0.5 font-medium">
+                  <Clock className="w-3 h-3 text-amber-400 shrink-0" />
+                  <span>ข้อมูลล่าสุดในฐานข้อมูล ณ: {formatLastUpdatedThai(lastSyncedAt)}</span>
+                </div>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -1188,7 +1364,7 @@ export default function App() {
               id="refresh-shared-banner-btn"
               onClick={() => loadSharedCalendarData(true)}
               disabled={isSharedLoading}
-              title="รีเฟรชเพื่อดึงข้อมูลนัดหมายล่าสุดของเพื่อน"
+              title="รีเฟรชเพื่อดึงข้อมูลนัดหมายล่าสุดของเพื่อนจากฐานข้อมูล"
               className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold transition-all text-xs shrink-0 shadow-xs active:scale-95 disabled:opacity-50 cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isSharedLoading ? 'animate-spin' : ''}`} />
@@ -1211,7 +1387,10 @@ export default function App() {
       {isViewOnly && isSharedLoading && (
         <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-2 text-xs text-amber-900 dark:text-amber-200 flex items-center justify-center gap-2 font-medium">
           <div className="w-3.5 h-3.5 border-2 border-amber-600 border-t-transparent rounded-full animate-spin" />
-          <span>กำลังโหลดข้อมูลปฏิทินของ {sharedOwnerName}...</span>
+          <span>
+            กำลังเชื่อมต่อฐานข้อมูลเพื่อดึงข้อมูลปฏิทินล่าสุดของ {sharedOwnerName}...
+            {lastSyncedAt ? ' (กำลังแสดงข้อมูล ณ ' + formatLastUpdatedThai(lastSyncedAt) + ')' : ''}
+          </span>
         </div>
       )}
 
@@ -1531,6 +1710,16 @@ export default function App() {
               >
                 วันนี้
               </button>
+
+              {lastSyncedAt && (
+                <div
+                  title={`ข้อมูลในฐานข้อมูล ณ: ${formatLastUpdatedThai(lastSyncedAt)}`}
+                  className="hidden md:flex items-center gap-1.5 ml-2 px-2.5 py-0.5 rounded-full bg-stone-100/90 dark:bg-stone-800 text-[11px] text-stone-600 dark:text-stone-300 font-medium border border-stone-200/80 dark:border-stone-700/80 shrink-0"
+                >
+                  <Clock className="w-3 h-3 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>ข้อมูลล่าสุด: {formatLastUpdatedThai(lastSyncedAt)}</span>
+                </div>
+              )}
             </div>
 
             {/* View Mode Switcher (Month / Week) */}
@@ -1796,6 +1985,7 @@ export default function App() {
         stickersCount={stickers.length}
         isCloudSynced={!!user}
         ownerName={calendarOwnerName !== 'My' ? calendarOwnerName : (user?.displayName || 'คุณ')}
+        lastSyncedAt={lastSyncedAt}
       />
 
       <ThemeSelector

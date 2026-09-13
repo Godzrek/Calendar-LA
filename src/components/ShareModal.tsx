@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import QRCode from 'qrcode';
 import { ThemeConfig } from '../types';
-import { X, Copy, Check, Share2, ShieldCheck, ExternalLink, Cloud, Download, QrCode as QrIcon } from 'lucide-react';
+import { formatLastUpdatedThai } from '../utils/dateUtils';
+import { X, Copy, Check, Share2, ShieldCheck, ExternalLink, Cloud, Download, QrCode as QrIcon, Clock } from 'lucide-react';
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -12,6 +13,7 @@ interface ShareModalProps {
   stickersCount: number;
   isCloudSynced: boolean;
   ownerName: string;
+  lastSyncedAt?: string;
 }
 
 export const ShareModal: React.FC<ShareModalProps> = ({
@@ -23,6 +25,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   stickersCount,
   isCloudSynced,
   ownerName,
+  lastSyncedAt,
 }) => {
   const [copied, setCopied] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -130,6 +133,12 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             <div className="flex items-center gap-1.5 text-[10px] text-emerald-800 dark:text-emerald-300 font-semibold pt-1 border-t border-blue-200/60 dark:border-blue-900/60">
               <Cloud className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
               <span>เชื่อมต่อฐานข้อมูล Firebase เรียลไทม์ (เมื่อคุณอัปเดตนัดหมาย เพื่อนจะเห็นทันที)</span>
+            </div>
+          )}
+          {lastSyncedAt && (
+            <div className="flex items-center gap-1.5 text-[10px] text-amber-800 dark:text-amber-300 font-semibold pt-1 border-t border-blue-200/60 dark:border-blue-900/60">
+              <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span>ข้อมูลล่าสุดในฐานข้อมูล ณ วันที่: {formatLastUpdatedThai(lastSyncedAt)}</span>
             </div>
           )}
         </div>

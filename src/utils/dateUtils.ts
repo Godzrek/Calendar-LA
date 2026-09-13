@@ -187,3 +187,27 @@ export function calculateSlotsForTimeRange(startTime: string, endTime: string): 
 
   return result.length > 0 ? result : [categorizeTimeToSlot(startTime)];
 }
+
+/**
+ * Format ISO timestamp to Thai date time string (e.g. 13 ก.ย. 2569 23:45 น.)
+ */
+export function formatLastUpdatedThai(isoDateString?: string | null): string {
+  if (!isoDateString) return '';
+  try {
+    const d = new Date(isoDateString);
+    if (isNaN(d.getTime())) return '';
+    const day = d.getDate();
+    const monthsThai = [
+      'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+      'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
+    ];
+    const month = monthsThai[d.getMonth()];
+    const yearBE = d.getFullYear() + 543;
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${day} ${month} ${yearBE} ${hours}:${minutes} น.`;
+  } catch {
+    return '';
+  }
+}
+

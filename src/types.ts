@@ -67,6 +67,7 @@ export interface ShareState {
   version: number;
   ownerName: string;
   sharedAt: string;
+  lastSyncedAt?: string;
   themeId: string;
   events: CalendarEvent[];
   stickers: StickerPlacement[];
