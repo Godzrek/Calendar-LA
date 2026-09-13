@@ -1,5 +1,8 @@
 import { CalendarEvent, StickerPlacement, ShareState } from '../types';
 
+/**
+ * URL-safe Base64 encoder for share payload
+ */
 export function encodeSharePayload(data: ShareState): string {
   try {
     const jsonStr = JSON.stringify(data);
@@ -8,25 +11,38 @@ export function encodeSharePayload(data: ShareState): string {
         return String.fromCharCode(parseInt(p1, 16));
       })
     );
-    return encodeURIComponent(base64);
+    // Convert to URL-safe base64
+    return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   } catch (err) {
     console.error('Failed to encode share payload:', err);
     return '';
   }
 }
 
+/**
+ * URL-safe Base64 decoder with robust fallback for spaces and legacy formats
+ */
 export function decodeSharePayload(encodedStr: string): ShareState | null {
   try {
-    const base64 = decodeURIComponent(encodedStr);
+    if (!encodedStr) return null;
+    // Normalize url-safe base64 and restore padding
+    let base64 = encodedStr.replace(/-/g, '+').replace(/_/g, '/');
+    // Also handle case where URLSearchParams converted '+' into ' '
+    base64 = base64.replace(/ /g, '+');
+    while (base64.length % 4) {
+      base64 += '=';
+    }
+
+    const decodedStr = atob(base64);
     const jsonStr = decodeURIComponent(
       Array.prototype.map
-        .call(atob(base64), (c: string) => {
+        .call(decodedStr, (c: string) => {
           return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
         })
         .join('')
     );
     const parsed = JSON.parse(jsonStr);
-    if (parsed && Array.isArray(parsed.events)) {
+    if (parsed && (Array.isArray(parsed.events) || parsed.version)) {
       return parsed as ShareState;
     }
     return null;
@@ -36,6 +52,11 @@ export function decodeSharePayload(encodedStr: string): ShareState | null {
   }
 }
 
+/**
+ * Generates a clean, short, and highly shareable URL.
+ * When ownerUid is available, produces a clean ~70 char URL linked to Firestore,
+ * ensuring zero 414 errors and fast QR code scanning.
+ */
 export function generateShareUrl(
   events: CalendarEvent[],
   stickers: StickerPlacement[],
@@ -47,16 +68,19 @@ export function generateShareUrl(
   currentUrl.searchParams.set('mode', 'readonly');
   currentUrl.searchParams.set('viewOnly', 'true');
 
+  const resolvedOwner = ownerName || 'เพื่อนของคุณ';
+
   if (ownerUid) {
-    // If user has a Firebase UID, share by UID for live cloud sync
+    // Primary method: Share via Firebase UID for real-time cloud data
     currentUrl.searchParams.set('cal', ownerUid);
-    currentUrl.searchParams.set('owner', encodeURIComponent(ownerName || 'เพื่อนของคุณ'));
+    currentUrl.searchParams.set('owner', resolvedOwner);
+    return currentUrl.toString();
   }
 
-  // Also include lightweight encoded snapshot as backup
-  const payload: ShareState = {
+  // Fallback for unauthenticated guest users: compact payload in hash to avoid Nginx URL limits
+  const compactPayload: ShareState = {
     version: 1,
-    ownerName: ownerName || 'เพื่อนของคุณ',
+    ownerName: resolvedOwner,
     sharedAt: new Date().toISOString(),
     themeId,
     events: events.map((e) => ({
@@ -82,12 +106,17 @@ export function generateShareUrl(
     })),
   };
 
-  const encoded = encodeSharePayload(payload);
-  currentUrl.searchParams.set('shareData', encoded);
+  const encoded = encodeSharePayload(compactPayload);
+  currentUrl.searchParams.set('owner', resolvedOwner);
+  // Put encoded data in hash to guarantee no HTTP 414 Request URI Too Large error
+  currentUrl.hash = `share=${encoded}`;
 
   return currentUrl.toString();
 }
 
+/**
+ * Checks if current page was opened from a share link (via query params or hash)
+ */
 export function checkIsViewOnlyFromUrl(): {
   isViewOnly: boolean;
   calOwnerUid: string | null;
@@ -96,14 +125,21 @@ export function checkIsViewOnlyFromUrl(): {
 } {
   try {
     const params = new URLSearchParams(window.location.search);
+    const calOwnerUid = params.get('cal');
+    const rawOwner = params.get('owner');
+    let shareData = params.get('shareData');
+
+    // Also check hash for #share=... (guest fallback)
+    if (!shareData && window.location.hash.includes('share=')) {
+      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      shareData = hashParams.get('share');
+    }
+
     const isViewOnly =
       params.get('viewOnly') === 'true' ||
       params.get('mode') === 'readonly' ||
-      !!params.get('cal');
-    const calOwnerUid = params.get('cal');
-    const rawOwner = params.get('owner');
-    const ownerName = rawOwner ? decodeURIComponent(rawOwner) : null;
-    const shareData = params.get('shareData');
+      !!calOwnerUid ||
+      !!shareData;
 
     let sharedState: ShareState | null = null;
     if (shareData) {
@@ -114,7 +150,7 @@ export function checkIsViewOnlyFromUrl(): {
       return {
         isViewOnly: true,
         calOwnerUid,
-        ownerName: ownerName || sharedState?.ownerName || 'เพื่อนของคุณ',
+        ownerName: rawOwner || sharedState?.ownerName || 'เพื่อนของคุณ',
         sharedState,
       };
     }

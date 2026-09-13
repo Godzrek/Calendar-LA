@@ -36,6 +36,8 @@ import {
   subscribeToEvents,
   saveEventToFirestore,
   deleteEventFromFirestore,
+  syncAllEventsToFirestore,
+  syncAllStickersToFirestore,
   subscribeToStickers,
   saveStickerToFirestore,
   deleteStickerFromFirestore,
@@ -127,6 +129,7 @@ export default function App() {
   const [friendEvents, setFriendEvents] = useState<CalendarEvent[]>([]);
   const [friendStickers, setFriendStickers] = useState<StickerPlacement[]>([]);
   const [initialFriendSearchTerm, setInitialFriendSearchTerm] = useState<string>('');
+  const [isRefreshingFriend, setIsRefreshingFriend] = useState(false);
 
   // Firestore sync state tracking
   const [isFirestoreConnected, setIsFirestoreConnected] = useState(false);
@@ -160,6 +163,7 @@ export default function App() {
 
   // Toast message
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isSharedLoading, setIsSharedLoading] = useState(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -168,12 +172,14 @@ export default function App() {
     }, 3500);
   };
 
-  // 1. Initial Load: Check if opened via View-Only share link or load from local storage
-  useEffect(() => {
-    const { isViewOnly: viewOnlyFromUrl, calOwnerUid, ownerName, sharedState } =
-      checkIsViewOnlyFromUrl();
+  // Shared calendar fetch/refresh logic for view-only mode
+  const loadSharedCalendarData = useCallback(
+    async (isManualRefresh = false) => {
+      const { isViewOnly: viewOnlyFromUrl, calOwnerUid, ownerName, sharedState } =
+        checkIsViewOnlyFromUrl();
 
-    if (viewOnlyFromUrl) {
+      if (!viewOnlyFromUrl) return;
+
       setIsViewOnly(true);
       const name = ownerName || sharedState?.ownerName || 'เพื่อนของคุณ';
       setSharedOwnerName(name);
@@ -182,49 +188,101 @@ export default function App() {
         setTheme(getThemeById(sharedState.themeId));
       }
 
-      // If a Firebase owner UID is provided in the URL, load live from Firestore Calendar-LA
+      const applySharedData = (evs: CalendarEvent[], stks: StickerPlacement[]) => {
+        setEvents(evs);
+        setStickers(stks);
+        // If there are events and none are in current month, auto-focus to first event's month
+        if (evs.length > 0) {
+          const curY = currentDate.getFullYear();
+          const curM = currentDate.getMonth();
+          const curMonthPrefix = `${curY}-${String(curM + 1).padStart(2, '0')}`;
+          const hasInCurMonth = evs.some((e) => e.date && e.date.startsWith(curMonthPrefix));
+          if (!hasInCurMonth) {
+            const firstDate = evs[0].date;
+            if (firstDate) {
+              const [y, m] = firstDate.split('-').map(Number);
+              if (y && m) {
+                setCurrentDate(new Date(y, m - 1, 1));
+              }
+            }
+          }
+        }
+      };
+
+      // If a Firebase owner UID is provided in the URL, load live from Firestore
       if (calOwnerUid) {
+        setIsSharedLoading(true);
         // Fetch owner profile to get custom theme & name
-        getUserProfile(calOwnerUid).then((profile) => {
-          if (profile?.displayName) {
-            setSharedOwnerName(profile.displayName);
-          }
-          if (profile?.themeId) {
-            setTheme(getThemeById(profile.themeId));
-          }
-        }).catch((err) => console.warn('Could not fetch owner profile:', err));
-
-        // Fetch shared events and stickers
-        getSharedEvents(calOwnerUid)
-          .then((cloudEvents) => {
-            if (cloudEvents.length > 0) {
-              setEvents(cloudEvents);
-            } else if (sharedState?.events) {
-              setEvents(sharedState.events);
+        getUserProfile(calOwnerUid)
+          .then((profile) => {
+            if (profile?.displayName) {
+              setSharedOwnerName(profile.displayName);
+            }
+            if (profile?.themeId) {
+              setTheme(getThemeById(profile.themeId));
             }
           })
-          .catch(() => {
-            if (sharedState?.events) setEvents(sharedState.events);
-          });
+          .catch((err) => console.warn('Could not fetch owner profile:', err));
 
-        getSharedStickers(calOwnerUid)
-          .then((cloudStickers) => {
-            if (cloudStickers.length > 0) {
-              setStickers(cloudStickers);
-            } else if (sharedState?.stickers) {
-              setStickers(sharedState.stickers);
-            }
-          })
-          .catch(() => {
-            if (sharedState?.stickers) setStickers(sharedState.stickers);
-          });
+        try {
+          const [cloudEvents, cloudStickers] = await Promise.all([
+            getSharedEvents(calOwnerUid).catch((err) => {
+              console.warn('getSharedEvents notice:', err);
+              return [] as CalendarEvent[];
+            }),
+            getSharedStickers(calOwnerUid).catch((err) => {
+              console.warn('getSharedStickers notice:', err);
+              return [] as StickerPlacement[];
+            }),
+          ]);
+
+          const finalEvents =
+            cloudEvents && cloudEvents.length > 0
+              ? cloudEvents
+              : sharedState?.events && sharedState.events.length > 0
+              ? sharedState.events
+              : [];
+          const finalStickers =
+            cloudStickers && cloudStickers.length > 0
+              ? cloudStickers
+              : sharedState?.stickers && sharedState.stickers.length > 0
+              ? sharedState.stickers
+              : [];
+          applySharedData(finalEvents, finalStickers);
+
+          if (isManualRefresh) {
+            showToast(`รีเฟรชข้อมูลปฏิทินของ ${name} สำเร็จ (พบนัดหมาย ${finalEvents.length} รายการ)`);
+          }
+        } catch (err) {
+          console.warn('Refresh shared calendar notice:', err);
+          if (sharedState) {
+            applySharedData(sharedState.events || [], sharedState.stickers || []);
+          }
+          if (isManualRefresh) {
+            showToast('รีเฟรชข้อมูลจากลิงก์แชร์เรียบร้อย');
+          }
+        } finally {
+          setIsSharedLoading(false);
+        }
 
         setIsFirestoreConnected(true);
       } else if (sharedState) {
-        // Fallback to URL encoded snapshot
-        setEvents(sharedState.events || []);
-        setStickers(sharedState.stickers || []);
+        // Fallback to URL / hash encoded snapshot
+        applySharedData(sharedState.events || [], sharedState.stickers || []);
+        if (isManualRefresh) {
+          showToast('รีเฟรชข้อมูลปฏิทินเรียบร้อย');
+        }
       }
+    },
+    [currentDate]
+  );
+
+  // 1. Initial Load: Check if opened via View-Only share link or load from local storage
+  useEffect(() => {
+    const { isViewOnly: viewOnlyFromUrl } = checkIsViewOnlyFromUrl();
+
+    if (viewOnlyFromUrl) {
+      loadSharedCalendarData(false);
       return;
     }
 
@@ -398,6 +456,9 @@ export default function App() {
             const nonGoogle = prev.filter((e) => !e.isGoogleEvent);
             return deduplicateEvents([...nonGoogle, ...gEvents]);
           });
+          if (user) {
+            syncAllEventsToFirestore(user.uid, gEvents).catch(console.warn);
+          }
           setGcalConnected(true);
         }
       } catch (err: any) {
@@ -453,6 +514,26 @@ export default function App() {
       unsubFriendStickers();
     };
   }, [viewingFriend]);
+
+  // Refresh friend's schedule manually
+  const handleRefreshFriendSchedule = async () => {
+    if (!viewingFriend) return;
+    setIsRefreshingFriend(true);
+    try {
+      const [evts, stks] = await Promise.all([
+        getSharedEvents(viewingFriend.friendUid),
+        getSharedStickers(viewingFriend.friendUid),
+      ]);
+      setFriendEvents(evts);
+      setFriendStickers(stks);
+      showToast(`รีเฟรชตารางของ ${viewingFriend.displayName} สำเร็จ (พบนัดหมาย ${evts.length} รายการ)`);
+    } catch (err) {
+      console.warn('Refresh friend schedule error:', err);
+      showToast('รีเฟรชข้อมูลไม่สำเร็จ โปรดลองอีกครั้ง');
+    } finally {
+      setIsRefreshingFriend(false);
+    }
+  };
 
   // Sync with Google Calendar (or connect if not yet authorized)
   const syncGoogleCalendar = useCallback(
@@ -512,6 +593,10 @@ export default function App() {
           return deduplicateEvents([...nonGoogle, ...gEvents]);
         });
 
+        if (user) {
+          syncAllEventsToFirestore(user.uid, gEvents).catch(console.warn);
+        }
+
         setGcalConnected(true);
         showToast(`ดึงข้อมูล Google Calendar สำเร็จ (พบนัดหมาย ${gEvents.length} รายการ)`);
       } catch (err: any) {
@@ -568,6 +653,7 @@ export default function App() {
                 const nonGoogle = prev.filter((e) => !e.isGoogleEvent);
                 return deduplicateEvents([...nonGoogle, ...gEvents]);
               });
+              syncAllEventsToFirestore(res.user.uid, gEvents).catch(console.warn);
               showToast(`เชื่อมต่อ Google Calendar สำเร็จ (นำเข้า ${gEvents.length} นัดหมาย)`);
             }
           } catch (gcalErr: any) {
@@ -965,6 +1051,20 @@ export default function App() {
 
   // Share Handler (generates read-only link for friends)
   const handleOpenShareModal = () => {
+    // If user is logged in, sync all current events to Firestore right before sharing
+    if (user) {
+      saveUserProfile({
+        uid: user.uid,
+        email: user.email || '',
+        displayName: calendarOwnerName !== 'My' ? calendarOwnerName : (user.displayName || 'เจ้าของปฏิทิน'),
+        themeId: theme.id,
+        updatedAt: new Date().toISOString(),
+      }).catch(console.warn);
+
+      syncAllEventsToFirestore(user.uid, events).catch(console.warn);
+      syncAllStickersToFirestore(user.uid, stickers).catch(console.warn);
+    }
+
     const url = generateShareUrl(
       events,
       stickers,
@@ -1011,7 +1111,7 @@ export default function App() {
         <aside
           aria-label="Shared calendar notice"
           id="view-only-banner"
-          className="bg-stone-900 text-white px-3.5 py-2.5 text-xs flex items-center justify-between gap-3 border-b border-stone-800 shadow-sm"
+          className="bg-stone-900 text-white px-3.5 py-2.5 text-xs flex flex-wrap items-center justify-between gap-3 border-b border-stone-800 shadow-sm"
         >
           <div className="flex items-center gap-2 min-w-0">
             <div className="p-1 rounded-md bg-amber-500/20 text-amber-400 shrink-0">
@@ -1026,16 +1126,37 @@ export default function App() {
               </span>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              window.location.href = window.location.origin + window.location.pathname;
-            }}
-            className="px-3 py-1 rounded-lg bg-white text-stone-900 font-bold hover:bg-stone-100 transition-colors text-xs shrink-0 shadow-xs"
-          >
-            ไปยังปฏิทินของฉัน
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              id="refresh-shared-banner-btn"
+              onClick={() => loadSharedCalendarData(true)}
+              disabled={isSharedLoading}
+              title="รีเฟรชเพื่อดึงข้อมูลนัดหมายล่าสุดของเพื่อน"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold transition-all text-xs shrink-0 shadow-xs active:scale-95 disabled:opacity-50 cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSharedLoading ? 'animate-spin' : ''}`} />
+              <span>{isSharedLoading ? 'กำลังโหลด...' : 'รีเฟรช'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                window.location.href = window.location.origin + window.location.pathname;
+              }}
+              className="px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-white font-medium transition-colors text-xs shrink-0 border border-white/20"
+            >
+              ไปยังปฏิทินของฉัน
+            </button>
+          </div>
         </aside>
+      )}
+
+      {/* Loading state for shared calendar */}
+      {isViewOnly && isSharedLoading && (
+        <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-2 text-xs text-amber-900 dark:text-amber-200 flex items-center justify-center gap-2 font-medium">
+          <div className="w-3.5 h-3.5 border-2 border-amber-600 border-t-transparent rounded-full animate-spin" />
+          <span>กำลังโหลดข้อมูลปฏิทินของ {sharedOwnerName}...</span>
+        </div>
       )}
 
       {/* Main Header (Clean, responsive non-overlapping layout) */}
@@ -1177,8 +1298,8 @@ export default function App() {
                 )}
               </button>
 
-              {/* Google Calendar Controls - Single Unified Button: "Google" if not logged in, "รีเฟรช" or "เชื่อมต่อ Calendar" if logged in */}
-              {!isViewOnly && (
+              {/* Google Calendar Controls when in normal mode, or Refresh Shared Calendar button when in view-only mode */}
+              {!isViewOnly ? (
                 <>
                   {user ? (
                     <div className="flex items-center gap-1 shrink-0">
@@ -1302,6 +1423,23 @@ export default function App() {
                     </button>
                   )}
                 </>
+              ) : (
+                /* Prominent Header Refresh Button for Friend in View-Only Mode */
+                <button
+                  type="button"
+                  id="refresh-shared-header-btn"
+                  onClick={() => loadSharedCalendarData(true)}
+                  disabled={isSharedLoading}
+                  title="รีเฟรชเพื่อดึงข้อมูลนัดหมายล่าสุดของเพื่อน"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold transition-all shadow-xs active:scale-95 cursor-pointer shrink-0 whitespace-nowrap disabled:opacity-50"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 text-amber-700 shrink-0 ${
+                      isSharedLoading ? 'animate-spin' : ''
+                    }`}
+                  />
+                  <span>{isSharedLoading ? 'กำลังโหลด...' : 'รีเฟรช'}</span>
+                </button>
               )}
             </div>
           </div>
@@ -1402,6 +1540,17 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              id="refresh-friend-schedule-btn"
+              onClick={handleRefreshFriendSchedule}
+              disabled={isRefreshingFriend}
+              title="รีเฟรชเพื่อดึงข้อมูลตารางล่าสุดของเพื่อน"
+              className="px-2.5 py-1.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs transition-colors flex items-center gap-1.5 border border-emerald-500/50 cursor-pointer disabled:opacity-50 active:scale-95 shadow-2xs"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-emerald-200 ${isRefreshingFriend ? 'animate-spin' : ''}`} />
+              <span>{isRefreshingFriend ? 'กำลังโหลด...' : 'รีเฟรช'}</span>
+            </button>
             <button
               type="button"
               onClick={() => setComparingFriend(viewingFriend)}

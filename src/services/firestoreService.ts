@@ -195,6 +195,48 @@ export async function deleteEventFromFirestore(
   }
 }
 
+// Batch sync all active events to Firestore (for sharing and cross-device sync)
+export async function syncAllEventsToFirestore(
+  userId: string,
+  events: CalendarEvent[]
+): Promise<void> {
+  if (!userId || events.length === 0) return;
+  try {
+    const promises = events.map((event) => {
+      const docRef = doc(db, 'users', userId, 'events', event.id);
+      return setDoc(
+        docRef,
+        {
+          ...event,
+          userId,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    });
+    await Promise.all(promises);
+  } catch (error) {
+    console.warn('Batch event sync notice:', error);
+  }
+}
+
+// Batch sync stickers to Firestore
+export async function syncAllStickersToFirestore(
+  userId: string,
+  stickers: StickerPlacement[]
+): Promise<void> {
+  if (!userId || stickers.length === 0) return;
+  try {
+    const promises = stickers.map((sticker) => {
+      const docRef = doc(db, 'users', userId, 'stickers', sticker.id);
+      return setDoc(docRef, { ...sticker, userId }, { merge: true });
+    });
+    await Promise.all(promises);
+  } catch (error) {
+    console.warn('Batch sticker sync notice:', error);
+  }
+}
+
 // Real-time listener for user stickers
 export function subscribeToStickers(
   userId: string,
