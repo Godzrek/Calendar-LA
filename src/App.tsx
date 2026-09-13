@@ -1285,50 +1285,76 @@ export default function App() {
   };
 
   // Share Handler (generates read-only link for friends)
-  const handleOpenShareModal = async () => {
-    let syncedAtIso = lastSyncedAt;
+  const handleOpenShareModal = () => {
+    try {
+      const owner =
+        calendarOwnerName !== 'My'
+          ? calendarOwnerName
+          : user?.displayName || 'เจ้าของปฏิทิน';
+      const initialSyncedAt = lastSyncedAt || new Date().toISOString();
 
-    // If user is logged in, sync all current events to Firestore snapshot right before sharing
-    if (user) {
-      try {
-        const nowISO = await saveCalendarSnapshot(user.uid, {
+      // 1. Generate share URL immediately and OPEN MODAL INSTANTLY! ZERO DELAY!
+      const url = generateShareUrl(
+        events,
+        stickers,
+        theme.id,
+        owner,
+        user?.uid,
+        initialSyncedAt
+      );
+      setShareUrl(url);
+      setIsShareModalOpen(true);
+
+      // 2. Perform background cloud sync non-blockingly without delaying the user
+      if (user) {
+        saveCalendarSnapshot(user.uid, {
           events,
           stickers,
           themeId: theme.id,
-          ownerName:
-            calendarOwnerName !== 'My'
-              ? calendarOwnerName
-              : user.displayName || 'เจ้าของปฏิทิน',
-        });
-        syncedAtIso = nowISO;
-        setLastSyncedAt(nowISO);
-        localStorage.setItem(STORAGE_LAST_SYNCED_KEY, nowISO);
-      } catch (e) {
-        console.warn('Snapshot pre-share save error:', e);
+          ownerName: owner,
+        })
+          .then((nowISO) => {
+            if (nowISO) {
+              setLastSyncedAt(nowISO);
+              try {
+                localStorage.setItem(STORAGE_LAST_SYNCED_KEY, nowISO);
+              } catch {
+                // Ignore storage errors
+              }
+              // Refresh shareUrl with updated timestamp
+              const refreshedUrl = generateShareUrl(
+                events,
+                stickers,
+                theme.id,
+                owner,
+                user.uid,
+                nowISO
+              );
+              setShareUrl(refreshedUrl);
+            }
+          })
+          .catch((e) => console.warn('Snapshot pre-share save error:', e));
+
+        saveUserProfile({
+          uid: user.uid,
+          email: user.email || '',
+          displayName: owner,
+          themeId: theme.id,
+          updatedAt: new Date().toISOString(),
+        }).catch(console.warn);
+
+        syncAllEventsToFirestore(user.uid, events).catch(console.warn);
+        syncAllStickersToFirestore(user.uid, stickers).catch(console.warn);
       }
-
-      saveUserProfile({
-        uid: user.uid,
-        email: user.email || '',
-        displayName: calendarOwnerName !== 'My' ? calendarOwnerName : (user.displayName || 'เจ้าของปฏิทิน'),
-        themeId: theme.id,
-        updatedAt: new Date().toISOString(),
-      }).catch(console.warn);
-
-      syncAllEventsToFirestore(user.uid, events).catch(console.warn);
-      syncAllStickersToFirestore(user.uid, stickers).catch(console.warn);
+    } catch (err) {
+      console.error('Error opening share modal:', err);
+      try {
+        setShareUrl(window.location.href);
+      } catch {
+        // ignore
+      }
+      setIsShareModalOpen(true);
     }
-
-    const url = generateShareUrl(
-      events,
-      stickers,
-      theme.id,
-      calendarOwnerName !== 'My' ? calendarOwnerName : (user?.displayName || 'เจ้าของปฏิทิน'),
-      user?.uid,
-      syncedAtIso || new Date().toISOString()
-    );
-    setShareUrl(url);
-    setIsShareModalOpen(true);
   };
 
   // Theme Change (Multiple themes)
@@ -1534,10 +1560,10 @@ export default function App() {
                 id="share-calendar-btn"
                 onClick={handleOpenShareModal}
                 title="แชร์ให้เพื่อนดู (โหมดดูอย่างเดียว)"
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-stone-200 bg-white hover:bg-stone-50 text-stone-700 text-xs font-medium shadow-2xs transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-blue-200 bg-blue-50/80 hover:bg-blue-100 text-blue-700 text-xs font-semibold shadow-2xs transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
               >
                 <Share2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                <span className="hidden xs:inline sm:inline">แชร์</span>
+                <span>แชร์</span>
               </button>
 
               {/* Friends & Schedule Sharing Button */}

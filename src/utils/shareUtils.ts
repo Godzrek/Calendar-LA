@@ -195,44 +195,68 @@ export function generateShareUrl(
   ownerUid?: string,
   lastSyncedAt?: string
 ): string {
-  // If running inside AI Studio development container (ais-dev-),
-  // automatically route to the public preview domain (ais-pre-) so external mobile phones can open it!
-  let origin = typeof window !== 'undefined' ? window.location.origin : '';
-  if (origin.includes('ais-dev-')) {
-    origin = origin.replace('ais-dev-', 'ais-pre-');
+  try {
+    let base = 'http://localhost:3000/';
+    if (typeof window !== 'undefined' && window.location) {
+      if (window.location.origin && window.location.origin !== 'null') {
+        base = `${window.location.origin}${window.location.pathname || '/'}`;
+      } else if (window.location.href) {
+        base = window.location.href.split('?')[0].split('#')[0];
+      }
+    }
+
+    // If running inside AI Studio development container (ais-dev-),
+    // automatically route to the public preview domain (ais-pre-) so external mobile phones can open it!
+    if (base.includes('ais-dev-')) {
+      base = base.replace('ais-dev-', 'ais-pre-');
+    }
+
+    const currentUrl = new URL(base);
+    currentUrl.searchParams.delete('d');
+    currentUrl.searchParams.delete('shareData');
+    currentUrl.searchParams.delete('data');
+    currentUrl.searchParams.delete('share');
+
+    currentUrl.searchParams.set('mode', 'readonly');
+    currentUrl.searchParams.set('viewOnly', 'true');
+
+    const resolvedOwner = ownerName || 'เพื่อนของคุณ';
+    currentUrl.searchParams.set('owner', resolvedOwner);
+
+    if (ownerUid) {
+      currentUrl.searchParams.set('cal', ownerUid);
+    } else {
+      currentUrl.searchParams.delete('cal');
+    }
+
+    // Create ultra-compact v2 payload
+    const compactPayload: CompactSharePayload = {
+      v: 2,
+      n: resolvedOwner,
+      t: themeId || 'modern-clean',
+      s: lastSyncedAt || new Date().toISOString(),
+      e: compressEvents(Array.isArray(events) ? events : []),
+      k: compressStickers(Array.isArray(stickers) ? stickers : []),
+    };
+
+    const encoded = encodeSharePayload(compactPayload);
+
+    if (encoded) {
+      // Put in query param '?d=' (survives messaging app redirects and link scrapers)
+      currentUrl.searchParams.set('d', encoded);
+      // Also put in hash '#share=' (instant zero-server evaluation)
+      currentUrl.hash = `share=${encoded}`;
+    }
+
+    return currentUrl.toString();
+  } catch (err) {
+    console.error('generateShareUrl error:', err);
+    try {
+      return typeof window !== 'undefined' ? window.location.href : 'http://localhost:3000/';
+    } catch {
+      return 'http://localhost:3000/';
+    }
   }
-
-  const pathname = typeof window !== 'undefined' ? window.location.pathname : '/';
-  const currentUrl = new URL(origin + pathname);
-  currentUrl.searchParams.set('mode', 'readonly');
-  currentUrl.searchParams.set('viewOnly', 'true');
-
-  const resolvedOwner = ownerName || 'เพื่อนของคุณ';
-  currentUrl.searchParams.set('owner', resolvedOwner);
-
-  if (ownerUid) {
-    currentUrl.searchParams.set('cal', ownerUid);
-  }
-
-  // Create ultra-compact v2 payload
-  const compactPayload: CompactSharePayload = {
-    v: 2,
-    n: resolvedOwner,
-    t: themeId,
-    s: lastSyncedAt || new Date().toISOString(),
-    e: compressEvents(events),
-    k: compressStickers(stickers),
-  };
-
-  const encoded = encodeSharePayload(compactPayload);
-
-  // Put in query param '?d=' (survives messaging app redirects and link scrapers)
-  currentUrl.searchParams.set('d', encoded);
-
-  // Also put in hash '#share=' (instant zero-server evaluation)
-  currentUrl.hash = `share=${encoded}`;
-
-  return currentUrl.toString();
 }
 
 /**

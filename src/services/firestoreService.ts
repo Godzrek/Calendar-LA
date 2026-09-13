@@ -368,22 +368,31 @@ export async function saveCalendarSnapshot(
       stickerCount: (data.stickers || []).length,
       userId,
     });
-    await setDoc(docRef, snapshotData, { merge: true });
+
+    // 2.5s timeout safeguard so unprovisioned or offline database never hangs caller UI
+    const timeoutPromise = new Promise<void>((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore write timeout')), 2500)
+    );
+
+    await Promise.race([setDoc(docRef, snapshotData, { merge: true }), timeoutPromise]);
 
     // Also update lastSyncedAt & metadata on user's profile document
     const userDocRef = doc(db, 'users', userId);
-    await setDoc(
-      userDocRef,
-      sanitizeForFirestore({
-        lastSyncedAt: nowISO,
-        eventCount: (data.events || []).length,
-        stickerCount: (data.stickers || []).length,
-        updatedAt: nowISO,
-        ...(data.themeId ? { themeId: data.themeId } : {}),
-        ...(data.ownerName ? { displayName: data.ownerName } : {}),
-      }),
-      { merge: true }
-    );
+    await Promise.race([
+      setDoc(
+        userDocRef,
+        sanitizeForFirestore({
+          lastSyncedAt: nowISO,
+          eventCount: (data.events || []).length,
+          stickerCount: (data.stickers || []).length,
+          updatedAt: nowISO,
+          ...(data.themeId ? { themeId: data.themeId } : {}),
+          ...(data.ownerName ? { displayName: data.ownerName } : {}),
+        }),
+        { merge: true }
+      ),
+      timeoutPromise,
+    ]);
     return nowISO;
   } catch (error) {
     console.warn('saveCalendarSnapshot notice:', error);
