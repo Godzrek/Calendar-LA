@@ -570,10 +570,16 @@ export default function App() {
     const unsubscribeEvents = subscribeToEvents(
       user.uid,
       (cloudEvents) => {
-        // Load user's existing events from Firestore and merge with any active Google Calendar events, removing duplicates
         setEvents((prev) => {
+          if (cloudEvents.length === 0) {
+            // If cloud subcollection is currently empty, preserve user's local events and sync them up!
+            if (prev.length > 0) {
+              syncAllEventsToFirestore(user.uid, prev).catch(console.warn);
+            }
+            return prev;
+          }
           const googleEvents = prev.filter((e) => e.isGoogleEvent);
-          return deduplicateEvents([...cloudEvents, ...googleEvents]);
+          return deduplicateEvents([...cloudEvents, ...googleEvents, ...prev]);
         });
       },
       (err) => console.warn('Firestore events listener:', err)
@@ -583,7 +589,13 @@ export default function App() {
     const unsubscribeStickers = subscribeToStickers(
       user.uid,
       (cloudStickers) => {
-        setStickers(cloudStickers);
+        setStickers((prev) => {
+          if (cloudStickers.length === 0 && prev.length > 0) {
+            syncAllStickersToFirestore(user.uid, prev).catch(console.warn);
+            return prev;
+          }
+          return cloudStickers.length > 0 ? cloudStickers : prev;
+        });
       },
       (err) => console.warn('Firestore stickers listener:', err)
     );

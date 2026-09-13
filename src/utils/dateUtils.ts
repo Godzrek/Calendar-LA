@@ -113,16 +113,39 @@ export function getCalendarGrid(year: number, month: number): MonthDayInfo[] {
   return days;
 }
 
+export function normalizeDateKey(dateStr?: string | null): string {
+  if (!dateStr) return '';
+  let clean = dateStr.trim();
+  if (clean.includes('T')) {
+    clean = clean.split('T')[0];
+  }
+  const parts = clean.split('-');
+  if (parts.length === 3) {
+    const y = parts[0];
+    const m = parts[1].padStart(2, '0');
+    const d = parts[2].padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return clean;
+}
+
 export function filterEventsBySlot(events: CalendarEvent[], dateKey: string, slot: TimeSlot): CalendarEvent[] {
+  if (!Array.isArray(events) || events.length === 0) return [];
+  const targetKey = normalizeDateKey(dateKey);
+
   return events
     .filter((e) => {
-      if (e.date !== dateKey) return false;
+      if (!e) return false;
+      const eventDate = normalizeDateKey(e.date);
+      if (eventDate !== targetKey) return false;
+
       if (e.slots && Array.isArray(e.slots) && e.slots.length > 0) {
         return e.slots.includes(slot);
       }
-      return e.slot === slot;
+      const eventSlot = e.slot || (e.startTime ? categorizeTimeToSlot(e.startTime) : 'morning');
+      return eventSlot === slot;
     })
-    .sort((a, b) => a.startTime.localeCompare(b.startTime));
+    .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
 }
 
 export function getDefaultTimeForSlot(slot: TimeSlot): { startTime: string; endTime: string } {
