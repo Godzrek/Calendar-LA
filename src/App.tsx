@@ -95,16 +95,31 @@ const STORAGE_OWNER_NAME_KEY = 'slot_calendar_owner_name_v2';
 const STORAGE_LAST_SYNCED_KEY = 'slot_calendar_last_synced_at_v2';
 
 export default function App() {
-  // Navigation Date (Defaults to current date / today)
-  const [currentDate, setCurrentDate] = useState(() => new Date());
+  // Check initial share status synchronously on mount
+  const initialShare = useMemo(() => checkIsViewOnlyFromUrl(), []);
+
+  // Navigation Date (Defaults to current date / today, or auto-focuses to shared event's month if in view-only mode)
+  const [currentDate, setCurrentDate] = useState(() => {
+    const today = new Date();
+    const share = checkIsViewOnlyFromUrl();
+    if (share.isViewOnly && share.sharedState?.events && share.sharedState.events.length > 0) {
+      const curMonthPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+      const hasInCurMonth = share.sharedState.events.some((e) => e.date?.startsWith(curMonthPrefix));
+      if (!hasInCurMonth) {
+        const firstEventDate = share.sharedState.events[0].date;
+        if (firstEventDate) {
+          const [y, m] = firstEventDate.split('-').map(Number);
+          if (y && m) return new Date(y, m - 1, 1);
+        }
+      }
+    }
+    return today;
+  });
   const [selectedDateKey, setSelectedDateKey] = useState<string>(() => {
     const today = new Date();
     return formatDateKey(today.getFullYear(), today.getMonth(), today.getDate());
   });
   const [viewMode, setViewMode] = useState<'month' | 'week'>('month');
-
-  // Check initial share status synchronously on mount
-  const initialShare = useMemo(() => checkIsViewOnlyFromUrl(), []);
 
   // Theme (defaults to Minimalist or saved or shared)
   const [theme, setTheme] = useState<ThemeConfig>(() => {
@@ -377,8 +392,12 @@ export default function App() {
       calOwnerUid,
       (snapshot) => {
         if (snapshot) {
-          if (snapshot.events) setEvents(snapshot.events);
-          if (snapshot.stickers) setStickers(snapshot.stickers);
+          if (snapshot.events && snapshot.events.length > 0) {
+            setEvents(snapshot.events);
+          }
+          if (snapshot.stickers && snapshot.stickers.length > 0) {
+            setStickers(snapshot.stickers);
+          }
           if (snapshot.lastSyncedAt) {
             setLastSyncedAt(snapshot.lastSyncedAt);
             localStorage.setItem(STORAGE_LAST_SYNCED_KEY, snapshot.lastSyncedAt);

@@ -55,6 +55,14 @@ export interface FirestoreErrorInfo {
   };
 }
 
+// Deep sanitize helper to strip any `undefined` values recursively before passing to Firestore
+export function sanitizeForFirestore<T>(obj: T): T {
+  if (obj === undefined) return null as unknown as T;
+  return JSON.parse(
+    JSON.stringify(obj, (_, value) => (value === undefined ? null : value))
+  );
+}
+
 export function handleFirestoreError(
   error: unknown,
   operationType: OperationType,
@@ -113,7 +121,7 @@ export async function saveUserProfile(profile: UserProfileData): Promise<void> {
   const path = `users/${profile.uid}`;
   try {
     const userRef = doc(db, 'users', profile.uid);
-    await setDoc(userRef, profile, { merge: true });
+    await setDoc(userRef, sanitizeForFirestore(profile), { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -170,11 +178,11 @@ export async function saveEventToFirestore(
     const docRef = doc(db, 'users', userId, 'events', event.id);
     await setDoc(
       docRef,
-      {
+      sanitizeForFirestore({
         ...event,
         userId,
         updatedAt: new Date().toISOString(),
-      },
+      }),
       { merge: true }
     );
   } catch (error) {
@@ -207,11 +215,11 @@ export async function syncAllEventsToFirestore(
       const docRef = doc(db, 'users', userId, 'events', event.id);
       return setDoc(
         docRef,
-        {
+        sanitizeForFirestore({
           ...event,
           userId,
           updatedAt: new Date().toISOString(),
-        },
+        }),
         { merge: true }
       );
     });
@@ -230,7 +238,7 @@ export async function syncAllStickersToFirestore(
   try {
     const promises = stickers.map((sticker) => {
       const docRef = doc(db, 'users', userId, 'stickers', sticker.id);
-      return setDoc(docRef, { ...sticker, userId }, { merge: true });
+      return setDoc(docRef, sanitizeForFirestore({ ...sticker, userId }), { merge: true });
     });
     await Promise.all(promises);
   } catch (error) {
@@ -350,30 +358,30 @@ export async function saveCalendarSnapshot(
   const nowISO = new Date().toISOString();
   try {
     const docRef = doc(db, 'users', userId, 'calendarData', 'snapshot');
-    const snapshotData = {
+    const snapshotData = sanitizeForFirestore({
       events: data.events || [],
       stickers: data.stickers || [],
-      themeId: data.themeId,
-      ownerName: data.ownerName,
+      themeId: data.themeId || null,
+      ownerName: data.ownerName || null,
       lastSyncedAt: nowISO,
       eventCount: (data.events || []).length,
       stickerCount: (data.stickers || []).length,
       userId,
-    };
+    });
     await setDoc(docRef, snapshotData, { merge: true });
 
     // Also update lastSyncedAt & metadata on user's profile document
     const userDocRef = doc(db, 'users', userId);
     await setDoc(
       userDocRef,
-      {
+      sanitizeForFirestore({
         lastSyncedAt: nowISO,
         eventCount: (data.events || []).length,
         stickerCount: (data.stickers || []).length,
         updatedAt: nowISO,
         ...(data.themeId ? { themeId: data.themeId } : {}),
         ...(data.ownerName ? { displayName: data.ownerName } : {}),
-      },
+      }),
       { merge: true }
     );
     return nowISO;
@@ -390,18 +398,22 @@ export async function getCalendarSnapshot(userId: string): Promise<CalendarSnaps
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
       const data = docSnap.data();
-      return {
-        events: Array.isArray(data.events) ? data.events : [],
-        stickers: Array.isArray(data.stickers) ? data.stickers : [],
-        themeId: data.themeId,
-        ownerName: data.ownerName,
-        lastSyncedAt: data.lastSyncedAt || '',
-        eventCount: data.eventCount || 0,
-        stickerCount: data.stickerCount || 0,
-      };
+      const events = Array.isArray(data.events) ? data.events : [];
+      const stickers = Array.isArray(data.stickers) ? data.stickers : [];
+      if (events.length > 0 || stickers.length > 0 || data.lastSyncedAt) {
+        return {
+          events,
+          stickers,
+          themeId: data.themeId,
+          ownerName: data.ownerName,
+          lastSyncedAt: data.lastSyncedAt || '',
+          eventCount: data.eventCount || events.length,
+          stickerCount: data.stickerCount || stickers.length,
+        };
+      }
     }
 
-    // Fallback if snapshot document hasn't been written yet: read subcollections
+    // Fallback if snapshot document hasn't been written yet or is empty: read subcollections
     const [events, stickers] = await Promise.all([
       getSharedEvents(userId).catch(() => [] as CalendarEvent[]),
       getSharedStickers(userId).catch(() => [] as StickerPlacement[]),

@@ -83,33 +83,31 @@ export function generateShareUrl(
   if (ownerUid) {
     // Cloud sync pointer for real-time cloud data from Firestore
     currentUrl.searchParams.set('cal', ownerUid);
-    // CRITICAL FOR QR CODE: Do NOT add heavy payload hash when cloud sync is available!
-    // Keeping the URL under 100 characters guarantees a crisp, low-density QR code
-    // with large blocks that scans instantaneously on any phone camera.
-    currentUrl.hash = '';
-    return currentUrl.toString();
   }
 
-  // Fallback for guest users without cloud sync:
-  // Include compact payload in the URL hash, keeping only essential fields
+  // ALWAYS include compact payload in the URL hash as an instant, zero-latency fallback!
+  // This guarantees that ANY friend opening the link or scanning the QR code sees the schedule
+  // 100% of the time, even if Firestore connection is latent, offline, or slow!
   const compactPayload: ShareState = {
     version: 1,
     ownerName: resolvedOwner,
     sharedAt: new Date().toISOString(),
     lastSyncedAt: lastSyncedAt || new Date().toISOString(),
     themeId,
-    events: events.slice(0, 30).map((e) => ({
+    events: events.map((e) => ({
       id: e.id,
       title: e.title,
-      sticker: e.sticker,
+      sticker: e.sticker || undefined,
+      description: e.description || undefined,
+      location: e.location || undefined,
       date: e.date,
       slot: e.slot,
-      slots: e.slots,
+      slots: e.slots || [e.slot],
       startTime: e.startTime,
       endTime: e.endTime,
-      color: e.color,
+      color: e.color || undefined,
     })),
-    stickers: stickers.slice(0, 25).map((s) => ({
+    stickers: stickers.map((s) => ({
       id: s.id,
       date: s.date,
       slot: s.slot,
