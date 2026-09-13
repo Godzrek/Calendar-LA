@@ -54,8 +54,8 @@ export function decodeSharePayload(encodedStr: string): ShareState | null {
 
 /**
  * Generates a clean, short, and highly shareable URL.
- * When ownerUid is available, produces a clean ~70 char URL linked to Firestore,
- * ensuring zero 414 errors and fast QR code scanning.
+ * When ownerUid is available, produces a clean ~75 char URL linked to Firestore,
+ * ensuring zero 414 errors and lightning-fast QR code scanning.
  */
 export function generateShareUrl(
   events: CalendarEvent[],
@@ -65,7 +65,15 @@ export function generateShareUrl(
   ownerUid?: string,
   lastSyncedAt?: string
 ): string {
-  const currentUrl = new URL(window.location.origin + window.location.pathname);
+  // If running inside AI Studio development container (ais-dev-),
+  // automatically route to the public preview domain (ais-pre-) so external mobile phones can open it!
+  let origin = typeof window !== 'undefined' ? window.location.origin : '';
+  if (origin.includes('ais-dev-')) {
+    origin = origin.replace('ais-dev-', 'ais-pre-');
+  }
+
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '/';
+  const currentUrl = new URL(origin + pathname);
   currentUrl.searchParams.set('mode', 'readonly');
   currentUrl.searchParams.set('viewOnly', 'true');
 
@@ -73,25 +81,27 @@ export function generateShareUrl(
   currentUrl.searchParams.set('owner', resolvedOwner);
 
   if (ownerUid) {
-    // Cloud sync pointer for real-time cloud data
+    // Cloud sync pointer for real-time cloud data from Firestore
     currentUrl.searchParams.set('cal', ownerUid);
+    // CRITICAL FOR QR CODE: Do NOT add heavy payload hash when cloud sync is available!
+    // Keeping the URL under 100 characters guarantees a crisp, low-density QR code
+    // with large blocks that scans instantaneously on any phone camera.
+    currentUrl.hash = '';
+    return currentUrl.toString();
   }
 
-  // Always include compact payload in the URL hash as an instant zero-latency local snapshot.
-  // The hash fragment (#share=...) stays purely in the browser client and is NEVER transmitted
-  // to the server in HTTP headers, preventing any HTTP 414 errors while guaranteeing immediate rendering!
+  // Fallback for guest users without cloud sync:
+  // Include compact payload in the URL hash, keeping only essential fields
   const compactPayload: ShareState = {
     version: 1,
     ownerName: resolvedOwner,
     sharedAt: new Date().toISOString(),
     lastSyncedAt: lastSyncedAt || new Date().toISOString(),
     themeId,
-    events: events.map((e) => ({
+    events: events.slice(0, 30).map((e) => ({
       id: e.id,
       title: e.title,
       sticker: e.sticker,
-      description: e.description,
-      location: e.location,
       date: e.date,
       slot: e.slot,
       slots: e.slots,
@@ -99,7 +109,7 @@ export function generateShareUrl(
       endTime: e.endTime,
       color: e.color,
     })),
-    stickers: stickers.map((s) => ({
+    stickers: stickers.slice(0, 25).map((s) => ({
       id: s.id,
       date: s.date,
       slot: s.slot,

@@ -31,37 +31,66 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(true);
 
-  // Generate QR Code locally via client-side canvas/data URL (100% reliable, zero external dependencies)
+  // Generate QR Code locally via client-side canvas/SVG (100% reliable, zero external dependencies)
   useEffect(() => {
     if (!shareUrl) return;
     let isCancelled = false;
     setQrLoading(true);
 
-    QRCode.toDataURL(shareUrl, {
-      width: 256,
-      margin: 1,
-      color: {
-        dark: '#1c1917',
-        light: '#ffffff',
-      },
-      errorCorrectionLevel: 'M',
-    })
-      .then((url) => {
+    const generateQrCode = async () => {
+      // 1. Try high-resolution Canvas DataURL first
+      try {
+        const url = await QRCode.toDataURL(shareUrl, {
+          width: 360,
+          margin: 2,
+          color: {
+            dark: '#1c1917',
+            light: '#ffffff',
+          },
+          errorCorrectionLevel: 'L',
+        });
         if (!isCancelled) {
           setQrDataUrl(url);
           setQrLoading(false);
+          return;
         }
-      })
-      .catch((err) => {
-        console.error('Local QR Code generation failed:', err);
+      } catch (err) {
+        console.warn('Canvas QR generation failed, attempting SVG vector fallback:', err);
+      }
+
+      // 2. Fallback to pure SVG string (bypasses any HTML5 canvas sandbox restrictions)
+      try {
+        const svgString = await QRCode.toString(shareUrl, {
+          type: 'svg',
+          margin: 2,
+          color: {
+            dark: '#1c1917',
+            light: '#ffffff',
+          },
+          errorCorrectionLevel: 'L',
+        });
+        const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgString)}`;
         if (!isCancelled) {
-          // Fallback to SVG or external if needed
-          setQrDataUrl(
-            `https://quickchart.io/qr?text=${encodeURIComponent(shareUrl)}&size=256&margin=1`
-          );
+          setQrDataUrl(svgDataUrl);
           setQrLoading(false);
+          return;
         }
-      });
+      } catch (svgErr) {
+        console.warn('SVG QR generation failed, attempting online generator fallback:', svgErr);
+      }
+
+      // 3. Fallback to high-reliability online QR generator
+      if (!isCancelled) {
+        setQrDataUrl(
+          `https://api.qrserver.com/v1/create-qr-code/?size=360x360&margin=10&data=${encodeURIComponent(
+            shareUrl
+          )}`
+        );
+        setQrLoading(false);
+      }
+    };
+
+    generateQrCode();
 
     return () => {
       isCancelled = true;
@@ -82,9 +111,10 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
   const handleDownloadQr = () => {
     if (!qrDataUrl) return;
+    const isSvg = qrDataUrl.startsWith('data:image/svg');
     const link = document.createElement('a');
     link.href = qrDataUrl;
-    link.download = `calendar-share-${encodeURIComponent(ownerName || 'friend')}.png`;
+    link.download = `calendar-share-${encodeURIComponent(ownerName || 'friend')}.${isSvg ? 'svg' : 'png'}`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -183,23 +213,28 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
         {/* QR Code & Actions */}
         <div className="mt-4 pt-3 border-t border-stone-200 dark:border-stone-700 flex flex-col items-center">
-          <div className="flex items-center gap-1.5 text-xs text-stone-600 dark:text-stone-400 font-medium mb-2.5">
-            <QrIcon className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-            <span>หรือให้เพื่อนสแกน QR Code ผ่านมือถือ:</span>
+          <div className="flex items-center gap-1.5 text-xs text-stone-700 dark:text-stone-300 font-semibold mb-2 text-center">
+            <QrIcon className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>สแกน QR Code ด้วยมือถือเพื่อดูปฏิทิน:</span>
           </div>
 
-          <div className="p-3 rounded-2xl bg-white border border-stone-200 shadow-md mb-2 flex items-center justify-center min-w-[160px] min-h-[160px]">
+          <div className="p-3.5 rounded-2xl bg-white border-2 border-stone-200 shadow-md mb-2 flex flex-col items-center justify-center min-w-[210px] min-h-[210px]">
             {qrLoading ? (
-              <div className="flex flex-col items-center justify-center gap-2 p-4 text-stone-400 text-xs">
-                <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+              <div className="flex flex-col items-center justify-center gap-2 p-6 text-stone-400 text-xs">
+                <div className="w-7 h-7 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
                 <span>กำลังสร้าง QR Code...</span>
               </div>
             ) : qrDataUrl ? (
-              <img
-                src={qrDataUrl}
-                alt={`QR Code สำหรับแชร์ปฏิทินของ ${ownerName}`}
-                className="w-36 h-36 object-contain rounded-lg"
-              />
+              <>
+                <img
+                  src={qrDataUrl}
+                  alt={`QR Code สำหรับแชร์ปฏิทินของ ${ownerName}`}
+                  className="w-48 h-48 sm:w-52 sm:h-52 object-contain rounded-md"
+                />
+                <span className="text-[10px] text-stone-500 font-medium mt-1">
+                  ใช้กล้อง iPhone / Android หรือ LINE สแกนได้ทันที
+                </span>
+              </>
             ) : (
               <div className="p-4 text-center text-xs text-rose-500">
                 ไม่สามารถสร้าง QR Code ได้
@@ -207,12 +242,12 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-3 mt-1">
+          <div className="flex flex-wrap items-center justify-center gap-2 mt-1.5">
             {qrDataUrl && (
               <button
                 type="button"
                 onClick={handleDownloadQr}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 flex items-center gap-1.5 transition-colors border border-stone-200 dark:border-stone-700"
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 flex items-center gap-1.5 transition-colors border border-stone-200 dark:border-stone-700 shadow-2xs"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>บันทึกรูป QR Code</span>
@@ -223,10 +258,10 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               href={shareUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 font-medium py-1.5"
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 flex items-center gap-1.5 transition-colors border border-blue-200 dark:border-blue-900 shadow-2xs"
             >
-              <span>ทดลองเปิดดูในหน้าต่างใหม่</span>
-              <ExternalLink className="w-3 h-3" />
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>เปิดทดสอบในแท็บใหม่</span>
             </a>
           </div>
         </div>
