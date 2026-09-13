@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { User } from 'firebase/auth';
 import { CalendarEvent, StickerPlacement, ThemeConfig, TimeSlot, FriendUser } from './types';
 import { DEFAULT_THEME, getThemeById, THEMES } from './constants/themes';
@@ -95,8 +95,17 @@ export default function App() {
   );
   const [viewMode, setViewMode] = useState<'month' | 'week'>('month');
 
-  // Theme (defaults to Minimalist or saved)
-  const [theme, setTheme] = useState<ThemeConfig>(DEFAULT_THEME);
+  // Check initial share status synchronously on mount
+  const initialShare = useMemo(() => checkIsViewOnlyFromUrl(), []);
+
+  // Theme (defaults to Minimalist or saved or shared)
+  const [theme, setTheme] = useState<ThemeConfig>(() => {
+    if (initialShare.isViewOnly && initialShare.sharedState?.themeId) {
+      return getThemeById(initialShare.sharedState.themeId);
+    }
+    const saved = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_THEME_KEY) : null;
+    return saved ? getThemeById(saved) : DEFAULT_THEME;
+  });
   const [isThemeOpen, setIsThemeOpen] = useState(false);
 
   // Auth & Google Calendar
@@ -107,8 +116,10 @@ export default function App() {
   const [gcalConnected, setGcalConnected] = useState(false);
 
   // View-Only Share Mode (Friends can view but CANNOT edit)
-  const [isViewOnly, setIsViewOnly] = useState(false);
-  const [sharedOwnerName, setSharedOwnerName] = useState<string>('เพื่อนของคุณ');
+  const [isViewOnly, setIsViewOnly] = useState(() => initialShare.isViewOnly);
+  const [sharedOwnerName, setSharedOwnerName] = useState<string>(
+    () => initialShare.ownerName || initialShare.sharedState?.ownerName || 'เพื่อนของคุณ'
+  );
   const [customOwnerName, setCustomOwnerName] = useState<string>(() => {
     return localStorage.getItem(STORAGE_OWNER_NAME_KEY) || '';
   });
@@ -117,9 +128,19 @@ export default function App() {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
 
-  // Events & Stickers State
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
-  const [stickers, setStickers] = useState<StickerPlacement[]>([]);
+  // Events & Stickers State - initialized with shared data instantly if available
+  const [events, setEvents] = useState<CalendarEvent[]>(() => {
+    if (initialShare.isViewOnly && initialShare.sharedState?.events) {
+      return initialShare.sharedState.events;
+    }
+    return [];
+  });
+  const [stickers, setStickers] = useState<StickerPlacement[]>(() => {
+    if (initialShare.isViewOnly && initialShare.sharedState?.stickers) {
+      return initialShare.sharedState.stickers;
+    }
+    return [];
+  });
 
   // Friend System State
   const [friends, setFriends] = useState<FriendUser[]>([]);
@@ -209,10 +230,16 @@ export default function App() {
         }
       };
 
-      // If a Firebase owner UID is provided in the URL, load live from Firestore
+      // 1. Immediately apply any pre-bundled payload so the calendar renders with zero wait
+      if (sharedState) {
+        applySharedData(sharedState.events || [], sharedState.stickers || []);
+      }
+
+      // 2. If a Firebase owner UID is provided in the URL, load live updates from Firestore with a strict 4.5s timeout
       if (calOwnerUid) {
         setIsSharedLoading(true);
-        // Fetch owner profile to get custom theme & name
+
+        // Fetch owner profile (name & theme) with graceful catch
         getUserProfile(calOwnerUid)
           .then((profile) => {
             if (profile?.displayName) {
@@ -225,7 +252,12 @@ export default function App() {
           .catch((err) => console.warn('Could not fetch owner profile:', err));
 
         try {
-          const [cloudEvents, cloudStickers] = await Promise.all([
+          // Timeout promise: prevent getting stuck in an endless spinner if network/Firestore is latent
+          const timeoutPromise = new Promise<{ isTimeout: true }>((resolve) =>
+            setTimeout(() => resolve({ isTimeout: true }), 4500)
+          );
+
+          const fetchPromise = Promise.all([
             getSharedEvents(calOwnerUid).catch((err) => {
               console.warn('getSharedEvents notice:', err);
               return [] as CalendarEvent[];
@@ -236,30 +268,41 @@ export default function App() {
             }),
           ]);
 
-          const finalEvents =
-            cloudEvents && cloudEvents.length > 0
-              ? cloudEvents
-              : sharedState?.events && sharedState.events.length > 0
-              ? sharedState.events
-              : [];
-          const finalStickers =
-            cloudStickers && cloudStickers.length > 0
-              ? cloudStickers
-              : sharedState?.stickers && sharedState.stickers.length > 0
-              ? sharedState.stickers
-              : [];
-          applySharedData(finalEvents, finalStickers);
+          const raceResult = await Promise.race([fetchPromise, timeoutPromise]);
 
-          if (isManualRefresh) {
-            showToast(`รีเฟรชข้อมูลปฏิทินของ ${name} สำเร็จ (พบนัดหมาย ${finalEvents.length} รายการ)`);
+          if ('isTimeout' in raceResult) {
+            console.warn('Firestore live fetch timed out; using existing data');
+            if (isManualRefresh) {
+              showToast('การเชื่อมต่อคลาวด์ใช้เวลานาน ได้แสดงข้อมูลล่าสุดที่พร้อมใช้งาน');
+            }
+          } else {
+            const [cloudEvents, cloudStickers] = raceResult;
+            const finalEvents =
+              cloudEvents && cloudEvents.length > 0
+                ? cloudEvents
+                : sharedState?.events && sharedState.events.length > 0
+                ? sharedState.events
+                : [];
+            const finalStickers =
+              cloudStickers && cloudStickers.length > 0
+                ? cloudStickers
+                : sharedState?.stickers && sharedState.stickers.length > 0
+                ? sharedState.stickers
+                : [];
+
+            applySharedData(finalEvents, finalStickers);
+
+            if (isManualRefresh) {
+              showToast(`รีเฟรชข้อมูลปฏิทินของ ${name} สำเร็จ (พบนัดหมาย ${finalEvents.length} รายการ)`);
+            }
           }
         } catch (err) {
-          console.warn('Refresh shared calendar notice:', err);
+          console.warn('Refresh shared calendar error:', err);
           if (sharedState) {
             applySharedData(sharedState.events || [], sharedState.stickers || []);
           }
           if (isManualRefresh) {
-            showToast('รีเฟรชข้อมูลจากลิงก์แชร์เรียบร้อย');
+            showToast('รีเฟรชข้อมูลเรียบร้อย');
           }
         } finally {
           setIsSharedLoading(false);
@@ -267,8 +310,6 @@ export default function App() {
 
         setIsFirestoreConnected(true);
       } else if (sharedState) {
-        // Fallback to URL / hash encoded snapshot
-        applySharedData(sharedState.events || [], sharedState.stickers || []);
         if (isManualRefresh) {
           showToast('รีเฟรชข้อมูลปฏิทินเรียบร้อย');
         }
@@ -276,6 +317,16 @@ export default function App() {
     },
     [currentDate]
   );
+
+  // Safety fallback: ensure isSharedLoading is never stuck longer than 5 seconds under any circumstance
+  useEffect(() => {
+    if (isSharedLoading) {
+      const timer = setTimeout(() => {
+        setIsSharedLoading(false);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [isSharedLoading]);
 
   // 1. Initial Load: Check if opened via View-Only share link or load from local storage
   useEffect(() => {
@@ -1010,9 +1061,14 @@ export default function App() {
     }
   };
 
-  // Slot Click Handler
+  // Slot Click Handler: when clicking an empty slot, directly open Add Event modal
   const handleSlotClick = (dateKey: string, slot: TimeSlot, slotEvents: CalendarEvent[]) => {
     setSelectedDateKey(dateKey);
+    if (!isEffectiveViewOnly && slotEvents.length === 0) {
+      // Directly open Add Event modal for the clicked empty slot
+      handleOpenAddEvent(dateKey, slot);
+      return;
+    }
     setSlotListDate(dateKey);
     setSlotListSlot(slot);
     setSlotListEvents(slotEvents);

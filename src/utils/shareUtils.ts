@@ -69,15 +69,16 @@ export function generateShareUrl(
   currentUrl.searchParams.set('viewOnly', 'true');
 
   const resolvedOwner = ownerName || 'เพื่อนของคุณ';
+  currentUrl.searchParams.set('owner', resolvedOwner);
 
   if (ownerUid) {
-    // Primary method: Share via Firebase UID for real-time cloud data
+    // Cloud sync pointer for real-time cloud data
     currentUrl.searchParams.set('cal', ownerUid);
-    currentUrl.searchParams.set('owner', resolvedOwner);
-    return currentUrl.toString();
   }
 
-  // Fallback for unauthenticated guest users: compact payload in hash to avoid Nginx URL limits
+  // Always include compact payload in the URL hash as an instant zero-latency local snapshot.
+  // The hash fragment (#share=...) stays purely in the browser client and is NEVER transmitted
+  // to the server in HTTP headers, preventing any HTTP 414 errors while guaranteeing immediate rendering!
   const compactPayload: ShareState = {
     version: 1,
     ownerName: resolvedOwner,
@@ -107,8 +108,6 @@ export function generateShareUrl(
   };
 
   const encoded = encodeSharePayload(compactPayload);
-  currentUrl.searchParams.set('owner', resolvedOwner);
-  // Put encoded data in hash to guarantee no HTTP 414 Request URI Too Large error
   currentUrl.hash = `share=${encoded}`;
 
   return currentUrl.toString();
