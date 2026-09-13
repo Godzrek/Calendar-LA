@@ -79,16 +79,20 @@ export const SlotDayCell: React.FC<SlotDayCellProps> = ({
       className={`group relative flex flex-col rounded-xl border p-1 sm:p-1.5 transition-all duration-150 min-h-[96px] sm:min-h-[135px] cursor-pointer ${
         !isCurrentMonth
           ? 'opacity-35 bg-stone-50/40'
+          : isToday
+          ? theme.isDark
+            ? 'bg-amber-950/70 border-amber-500 shadow-md ring-2 ring-amber-500/80'
+            : 'bg-amber-100/90 border-amber-500 shadow-md ring-2 ring-amber-500/80'
           : isHoliday
           ? theme.isDark
             ? 'bg-stone-900 border-stone-700 shadow-xs'
             : 'bg-stone-200/90 border-stone-300 shadow-2xs'
           : theme.cardBg
       } ${
-        isSelected
+        isSelected && !isToday
           ? 'ring-2 ring-amber-500 shadow-xs border-amber-400'
           : isToday
-          ? 'ring-1.5 ring-amber-500 shadow-xs'
+          ? 'border-amber-500'
           : isHoliday
           ? 'border-stone-300/90'
           : theme.cardBorder
@@ -96,11 +100,11 @@ export const SlotDayCell: React.FC<SlotDayCellProps> = ({
     >
       {/* Top Header: Day Number & Day-level Stickers / Indicators */}
       <div className="flex items-center justify-between pb-1 px-0.5">
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 min-w-0">
           <span
-            className={`inline-flex items-center justify-center text-[11px] sm:text-xs font-semibold rounded-full h-5 w-5 sm:h-6 sm:w-6 transition-colors ${
+            className={`inline-flex items-center justify-center text-[11px] sm:text-xs font-semibold rounded-full h-5 w-5 sm:h-6 sm:w-6 transition-colors shrink-0 ${
               isToday
-                ? 'bg-amber-500 text-white font-bold'
+                ? 'bg-stone-950 text-amber-300 dark:bg-amber-400 dark:text-stone-950 font-black shadow-xs ring-1.5 ring-amber-400'
                 : isSelected
                 ? 'bg-amber-500 text-white font-bold'
                 : isHoliday
@@ -113,8 +117,13 @@ export const SlotDayCell: React.FC<SlotDayCellProps> = ({
             {dayNumber}
           </span>
           {isToday && (
-            <span className="hidden md:inline-block text-[9px] font-medium text-amber-600">
-              วันนี้
+            <span
+              id={`today-dot-${dateKey}`}
+              title="วันนี้ (Today)"
+              className="relative flex h-2 w-2 sm:h-2.5 sm:w-2.5 shrink-0"
+            >
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-500 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 sm:h-2.5 sm:w-2.5 bg-amber-600 dark:bg-amber-400" />
             </span>
           )}
           {isHoliday && (

@@ -95,11 +95,12 @@ const STORAGE_OWNER_NAME_KEY = 'slot_calendar_owner_name_v2';
 const STORAGE_LAST_SYNCED_KEY = 'slot_calendar_last_synced_at_v2';
 
 export default function App() {
-  // Navigation Date
-  const [currentDate, setCurrentDate] = useState(() => new Date(2026, 8, 12)); // Sept 12, 2026
-  const [selectedDateKey, setSelectedDateKey] = useState<string>(() =>
-    formatDateKey(2026, 8, 12)
-  );
+  // Navigation Date (Defaults to current date / today)
+  const [currentDate, setCurrentDate] = useState(() => new Date());
+  const [selectedDateKey, setSelectedDateKey] = useState<string>(() => {
+    const today = new Date();
+    return formatDateKey(today.getFullYear(), today.getMonth(), today.getDate());
+  });
   const [viewMode, setViewMode] = useState<'month' | 'week'>('month');
 
   // Check initial share status synchronously on mount

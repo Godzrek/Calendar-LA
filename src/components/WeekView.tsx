@@ -63,14 +63,18 @@ export const WeekView: React.FC<WeekViewProps> = ({
           <div
             key={day.dateKey}
             className={`flex flex-col rounded-2xl border p-2.5 transition-all ${
-              specialInfo.isHoliday
+              day.isToday
+                ? theme.isDark
+                  ? 'bg-amber-950/70 border-amber-500 shadow-md ring-2 ring-amber-500/80'
+                  : 'bg-amber-100/90 border-amber-500 shadow-md ring-2 ring-amber-500/80'
+                : specialInfo.isHoliday
                 ? theme.isDark
                   ? 'bg-stone-900 border-stone-700 shadow-xs'
                   : 'bg-stone-200/90 border-stone-300 shadow-2xs'
                 : theme.cardBg
             } ${
               day.isToday
-                ? 'ring-2 ring-amber-500 shadow-md'
+                ? 'border-amber-500'
                 : specialInfo.isHoliday
                 ? 'border-stone-300/90'
                 : theme.cardBorder
@@ -104,7 +108,7 @@ export const WeekView: React.FC<WeekViewProps> = ({
                   <span
                     className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
                       day.isToday
-                        ? 'bg-amber-500 text-white'
+                        ? 'bg-stone-950 text-amber-300 dark:bg-amber-400 dark:text-stone-950 font-black shadow-xs ring-1.5 ring-amber-400'
                         : specialInfo.isHoliday
                         ? 'bg-red-500/15 text-red-600 dark:text-red-400'
                         : theme.textColor
@@ -113,7 +117,13 @@ export const WeekView: React.FC<WeekViewProps> = ({
                     {day.dayNumber}
                   </span>
                   {day.isToday && (
-                    <span className="text-[9px] text-amber-600 font-bold">วันนี้</span>
+                    <span
+                      title="วันนี้ (Today)"
+                      className="relative flex h-2 w-2 shrink-0 ml-0.5"
+                    >
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-500 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-600 dark:bg-amber-400" />
+                    </span>
                   )}
                 </div>
               </div>

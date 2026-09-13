@@ -1,6 +1,6 @@
 import React from 'react';
 import { CalendarEvent, StickerPlacement, ThemeConfig, TimeSlot } from '../types';
-import { formatThaiDate, filterEventsBySlot } from '../utils/dateUtils';
+import { formatThaiDate, filterEventsBySlot, formatDateKey } from '../utils/dateUtils';
 import { getDaySpecialInfo } from '../utils/thaiHolidays';
 import { Plus, Clock, MapPin, Sparkles, ChevronRight } from 'lucide-react';
 
@@ -54,12 +54,19 @@ export const DayScheduleCard: React.FC<DayScheduleCardProps> = ({
   ];
 
   const specialInfo = getDaySpecialInfo(dateKey);
+  const today = new Date();
+  const todayKey = formatDateKey(today.getFullYear(), today.getMonth(), today.getDate());
+  const isToday = dateKey === todayKey;
 
   return (
     <div
       id="mobile-day-schedule"
       className={`mt-3 rounded-2xl border p-3.5 sm:p-4 shadow-xs transition-colors ${
-        specialInfo.isHoliday
+        isToday
+          ? theme.isDark
+            ? 'bg-amber-950/40 border-amber-500/80 shadow-md ring-1 ring-amber-500/50'
+            : 'bg-amber-50/90 border-amber-400 shadow-md ring-1 ring-amber-400/50'
+          : specialInfo.isHoliday
           ? 'bg-stone-100 dark:bg-stone-800/90 border-stone-300 dark:border-stone-700'
           : 'border-stone-200/80 bg-white dark:bg-stone-900'
       }`}
@@ -69,9 +76,20 @@ export const DayScheduleCard: React.FC<DayScheduleCardProps> = ({
         <div className="flex items-center gap-2">
           <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
           <div>
-            <h3 className="text-sm sm:text-base font-bold text-stone-900 dark:text-stone-100 leading-tight">
-              ตารางนัดหมาย: {formatThaiDate(dateKey)}
-            </h3>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <h3 className="text-sm sm:text-base font-bold text-stone-900 dark:text-stone-100 leading-tight">
+                ตารางนัดหมาย: {formatThaiDate(dateKey)}
+              </h3>
+              {isToday && (
+                <span
+                  title="วันนี้ (Today)"
+                  className="relative flex h-2 w-2 shrink-0 ml-1"
+                >
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-500 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-600 dark:bg-amber-400" />
+                </span>
+              )}
+            </div>
             <p className="text-[11px] text-stone-400">
               แตะรายการเพื่อดูรายละเอียด
             </p>
