@@ -61,5 +61,12 @@ service cloud.firestore {
         allow create, update, delete: if isOwner(userId);
       }
     }
+
+    // Public shared snapshots for short link and QR code access
+    match /sharedSnapshots/{shareId} {
+      allow get: if true;
+      allow create, update: if true;
+      allow delete: if false;
+    }
   }
 }

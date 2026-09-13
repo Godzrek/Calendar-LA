@@ -64,6 +64,22 @@
         "addedAt": { "type": "string", "description": "ISO timestamp when added" }
       },
       "required": ["friendUid", "email"]
+    },
+    "SharedSnapshot": {
+      "title": "SharedSnapshot",
+      "description": "Public shared calendar snapshot for sharing via short link or QR code",
+      "type": "object",
+      "properties": {
+        "shareId": { "type": "string", "description": "Unique share snapshot identifier" },
+        "events": { "type": "array", "description": "List of calendar events in snapshot" },
+        "stickers": { "type": "array", "description": "List of sticker placements" },
+        "themeId": { "type": "string", "description": "Theme ID for display" },
+        "ownerName": { "type": "string", "description": "Calendar owner display name" },
+        "userId": { "type": "string", "description": "Optional user UID of creator" },
+        "createdAt": { "type": "string", "description": "ISO timestamp of creation" },
+        "lastSyncedAt": { "type": "string", "description": "ISO timestamp of snapshot data" }
+      },
+      "required": ["shareId"]
     }
   },
   "firestore": {
@@ -82,6 +98,10 @@
     "/users/{userId}/friends/{friendId}": {
       "schema": "Friend",
       "description": "Collection of friends saved by the user"
+    },
+    "/sharedSnapshots/{shareId}": {
+      "schema": "SharedSnapshot",
+      "description": "Public shared calendar snapshots accessible for read-only view"
     }
   }
 }

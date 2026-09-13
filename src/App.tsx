@@ -48,6 +48,9 @@ import {
   saveCalendarSnapshot,
   getCalendarSnapshot,
   subscribeToCalendarSnapshot,
+  savePublicSharedSnapshot,
+  getPublicSharedSnapshot,
+  subscribeToPublicSharedSnapshot,
   CalendarSnapshot,
 } from './services/firestoreService';
 import { MonthView } from './components/MonthView';
@@ -238,7 +241,7 @@ export default function App() {
   // Shared calendar fetch/refresh logic for view-only mode
   const loadSharedCalendarData = useCallback(
     async (isManualRefresh = false) => {
-      const { isViewOnly: viewOnlyFromUrl, calOwnerUid, ownerName, sharedState } =
+      const { isViewOnly: viewOnlyFromUrl, calOwnerUid, shareId, ownerName, sharedState } =
         checkIsViewOnlyFromUrl();
 
       if (!viewOnlyFromUrl) return;
@@ -277,37 +280,53 @@ export default function App() {
         applySharedData(sharedState.events || [], sharedState.stickers || []);
         if (sharedState.lastSyncedAt) {
           setLastSyncedAt(sharedState.lastSyncedAt);
-          localStorage.setItem(STORAGE_LAST_SYNCED_KEY, sharedState.lastSyncedAt);
+          try {
+            localStorage.setItem(STORAGE_LAST_SYNCED_KEY, sharedState.lastSyncedAt);
+          } catch {
+            // ignore
+          }
         }
       }
 
-      // 2. If a Firebase owner UID is provided in the URL, load live updates from Firestore database snapshot with a 3.5s timeout
-      if (calOwnerUid) {
+      // 2. If a Firebase snapshot ID or owner UID is provided in the URL, load live updates from Firestore
+      const targetShareId = shareId;
+      const targetUserUid = calOwnerUid;
+
+      if (targetShareId || targetUserUid) {
         setIsSharedLoading(true);
 
-        // Fetch owner profile (name & theme) with graceful catch
-        getUserProfile(calOwnerUid)
-          .then((profile) => {
-            if (profile?.displayName) {
-              setSharedOwnerName(profile.displayName);
-            }
-            if (profile?.themeId) {
-              setTheme(getThemeById(profile.themeId));
-            }
-            if (profile?.lastSyncedAt && !lastSyncedAt) {
-              setLastSyncedAt(profile.lastSyncedAt);
-              localStorage.setItem(STORAGE_LAST_SYNCED_KEY, profile.lastSyncedAt);
-            }
-          })
-          .catch((err) => console.warn('Could not fetch owner profile:', err));
+        // Fetch owner profile if user ID exists
+        if (targetUserUid) {
+          getUserProfile(targetUserUid)
+            .then((profile) => {
+              if (profile?.displayName) {
+                setSharedOwnerName(profile.displayName);
+              }
+              if (profile?.themeId) {
+                setTheme(getThemeById(profile.themeId));
+              }
+              if (profile?.lastSyncedAt && !lastSyncedAt) {
+                setLastSyncedAt(profile.lastSyncedAt);
+                try {
+                  localStorage.setItem(STORAGE_LAST_SYNCED_KEY, profile.lastSyncedAt);
+                } catch {
+                  // ignore
+                }
+              }
+            })
+            .catch((err) => console.warn('Could not fetch owner profile:', err));
+        }
 
         try {
-          // Timeout promise: prevent getting stuck in an endless spinner if network/Firestore is latent
+          // Timeout promise: prevent getting stuck if network/Firestore is latent
           const timeoutPromise = new Promise<{ isTimeout: true }>((resolve) =>
-            setTimeout(() => resolve({ isTimeout: true }), 3500)
+            setTimeout(() => resolve({ isTimeout: true }), 10000)
           );
 
-          const fetchPromise = getCalendarSnapshot(calOwnerUid);
+          const fetchPromise = targetShareId
+            ? getPublicSharedSnapshot(targetShareId)
+            : getCalendarSnapshot(targetUserUid!);
+
           const raceResult = await Promise.race([fetchPromise, timeoutPromise]);
 
           if ('isTimeout' in raceResult) {
@@ -337,7 +356,11 @@ export default function App() {
 
             if (snapshot.lastSyncedAt) {
               setLastSyncedAt(snapshot.lastSyncedAt);
-              localStorage.setItem(STORAGE_LAST_SYNCED_KEY, snapshot.lastSyncedAt);
+              try {
+                localStorage.setItem(STORAGE_LAST_SYNCED_KEY, snapshot.lastSyncedAt);
+              } catch {
+                // ignore
+              }
             }
             if (snapshot.ownerName) {
               setSharedOwnerName(snapshot.ownerName);
@@ -356,7 +379,7 @@ export default function App() {
             }
           }
         } catch (err) {
-          console.warn('Refresh shared calendar error:', err);
+          console.warn('Refresh shared calendar notice:', err);
           if (sharedState) {
             applySharedData(sharedState.events || [], sharedState.stickers || []);
           }
@@ -385,31 +408,49 @@ export default function App() {
 
   // Live real-time snapshot subscription for view-only mode
   useEffect(() => {
-    const { isViewOnly: viewOnlyFromUrl, calOwnerUid } = checkIsViewOnlyFromUrl();
-    if (!viewOnlyFromUrl || !calOwnerUid) return;
+    const { isViewOnly: viewOnlyFromUrl, calOwnerUid, shareId } = checkIsViewOnlyFromUrl();
+    if (!viewOnlyFromUrl) return;
 
-    const unsubscribe = subscribeToCalendarSnapshot(
-      calOwnerUid,
-      (snapshot) => {
-        if (snapshot) {
-          if (snapshot.events && snapshot.events.length > 0) {
-            setEvents(snapshot.events);
-          }
-          if (snapshot.stickers && snapshot.stickers.length > 0) {
-            setStickers(snapshot.stickers);
-          }
-          if (snapshot.lastSyncedAt) {
-            setLastSyncedAt(snapshot.lastSyncedAt);
-            localStorage.setItem(STORAGE_LAST_SYNCED_KEY, snapshot.lastSyncedAt);
-          }
-          if (snapshot.ownerName) setSharedOwnerName(snapshot.ownerName);
-          if (snapshot.themeId) setTheme(getThemeById(snapshot.themeId));
+    let unsubscribe: () => void = () => {};
+
+    const handleSnapshotUpdate = (snapshot: CalendarSnapshot) => {
+      if (snapshot) {
+        if (snapshot.events && snapshot.events.length > 0) {
+          setEvents(snapshot.events);
         }
-      },
-      (err) => console.warn('Shared calendar real-time snapshot listener notice:', err)
-    );
+        if (snapshot.stickers && snapshot.stickers.length > 0) {
+          setStickers(snapshot.stickers);
+        }
+        if (snapshot.lastSyncedAt) {
+          setLastSyncedAt(snapshot.lastSyncedAt);
+          try {
+            localStorage.setItem(STORAGE_LAST_SYNCED_KEY, snapshot.lastSyncedAt);
+          } catch {
+            // ignore
+          }
+        }
+        if (snapshot.ownerName) setSharedOwnerName(snapshot.ownerName);
+        if (snapshot.themeId) setTheme(getThemeById(snapshot.themeId));
+      }
+    };
 
-    return () => unsubscribe();
+    if (shareId) {
+      unsubscribe = subscribeToPublicSharedSnapshot(
+        shareId,
+        handleSnapshotUpdate,
+        (err) => console.warn('Public shared snapshot listener notice:', err)
+      );
+    } else if (calOwnerUid) {
+      unsubscribe = subscribeToCalendarSnapshot(
+        calOwnerUid,
+        handleSnapshotUpdate,
+        (err) => console.warn('Shared calendar real-time snapshot listener notice:', err)
+      );
+    }
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   // Safety fallback: ensure isSharedLoading is never stuck longer than 5 seconds under any circumstance
@@ -1292,6 +1333,8 @@ export default function App() {
           ? calendarOwnerName
           : user?.displayName || 'เจ้าของปฏิทิน';
       const initialSyncedAt = lastSyncedAt || new Date().toISOString();
+      // Generate clean unique share identifier
+      const shareId = `s_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
 
       // 1. Generate share URL immediately and OPEN MODAL INSTANTLY! ZERO DELAY!
       const url = generateShareUrl(
@@ -1300,12 +1343,22 @@ export default function App() {
         theme.id,
         owner,
         user?.uid,
-        initialSyncedAt
+        initialSyncedAt,
+        shareId
       );
       setShareUrl(url);
       setIsShareModalOpen(true);
 
       // 2. Perform background cloud sync non-blockingly without delaying the user
+      // Save public snapshot document so any visitor or QR code scan loads data immediately
+      savePublicSharedSnapshot(shareId, {
+        events,
+        stickers,
+        themeId: theme.id,
+        ownerName: owner,
+        userId: user?.uid,
+      }).catch((e) => console.warn('Public snapshot pre-share save notice:', e));
+
       if (user) {
         saveCalendarSnapshot(user.uid, {
           events,
@@ -1328,7 +1381,8 @@ export default function App() {
                 theme.id,
                 owner,
                 user.uid,
-                nowISO
+                nowISO,
+                shareId
               );
               setShareUrl(refreshedUrl);
             }

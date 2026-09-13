@@ -38,16 +38,21 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     setQrLoading(true);
 
     const generateQrCode = async () => {
+      // Keep complete shareUrl with compressed payload so mobile scans load all events immediately
+      const targetForQr = shareUrl;
+      // If URL is longer than 1200 characters, use Level L error correction for maximum QR density headroom
+      const errorCorrectionLevel = targetForQr.length > 1200 ? 'L' : 'M';
+
       // 1. Try high-resolution Canvas DataURL first
       try {
-        const url = await QRCode.toDataURL(shareUrl, {
+        const url = await QRCode.toDataURL(targetForQr, {
           width: 360,
           margin: 2,
           color: {
             dark: '#1c1917',
             light: '#ffffff',
           },
-          errorCorrectionLevel: 'L',
+          errorCorrectionLevel,
         });
         if (!isCancelled) {
           setQrDataUrl(url);
@@ -55,12 +60,12 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           return;
         }
       } catch (err) {
-        console.warn('Canvas QR generation failed, attempting SVG vector fallback:', err);
+        console.warn('Canvas QR generation notice:', err);
       }
 
       // 2. Fallback to pure SVG string (bypasses any HTML5 canvas sandbox restrictions)
       try {
-        const svgString = await QRCode.toString(shareUrl, {
+        const svgString = await QRCode.toString(targetForQr, {
           type: 'svg',
           margin: 2,
           color: {
@@ -76,14 +81,14 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           return;
         }
       } catch (svgErr) {
-        console.warn('SVG QR generation failed, attempting online generator fallback:', svgErr);
+        console.warn('SVG QR generation notice:', svgErr);
       }
 
-      // 3. Fallback to high-reliability online QR generator
+      // 3. Fallback to image generator
       if (!isCancelled) {
         setQrDataUrl(
           `https://api.qrserver.com/v1/create-qr-code/?size=360x360&margin=10&data=${encodeURIComponent(
-            shareUrl
+            targetForQr
           )}`
         );
         setQrLoading(false);
@@ -106,6 +111,17 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       setTimeout(() => setCopied(false), 2500);
     } catch (err) {
       console.error('Failed to copy', err);
+    }
+  };
+
+  const handleOpenInNewTab = (e: React.MouseEvent) => {
+    try {
+      const newWin = window.open(shareUrl, '_blank', 'noopener,noreferrer');
+      if (newWin && !newWin.closed) {
+        e.preventDefault();
+      }
+    } catch (err) {
+      console.warn('window.open blocked, relying on direct link navigation:', err);
     }
   };
 
@@ -258,6 +274,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               href={shareUrl}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={handleOpenInNewTab}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 flex items-center gap-1.5 transition-colors border border-blue-200 dark:border-blue-900 shadow-2xs"
             >
               <ExternalLink className="w-3.5 h-3.5" />

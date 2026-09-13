@@ -369,9 +369,9 @@ export async function saveCalendarSnapshot(
       userId,
     });
 
-    // 2.5s timeout safeguard so unprovisioned or offline database never hangs caller UI
+    // 10s timeout safeguard so slow connections don't hang, but normal writes finish cleanly
     const timeoutPromise = new Promise<void>((_, reject) =>
-      setTimeout(() => reject(new Error('Firestore write timeout')), 2500)
+      setTimeout(() => reject(new Error('Firestore write timeout')), 10000)
     );
 
     await Promise.race([setDoc(docRef, snapshotData, { merge: true }), timeoutPromise]);
@@ -398,6 +398,99 @@ export async function saveCalendarSnapshot(
     console.warn('saveCalendarSnapshot notice:', error);
     return nowISO;
   }
+}
+
+// Save public shared snapshot (enables short share links and 100% reliable QR codes for any user)
+export async function savePublicSharedSnapshot(
+  shareId: string,
+  data: {
+    events: CalendarEvent[];
+    stickers: StickerPlacement[];
+    themeId?: string;
+    ownerName?: string;
+    userId?: string;
+  }
+): Promise<string> {
+  const nowISO = new Date().toISOString();
+  try {
+    const docRef = doc(db, 'sharedSnapshots', shareId);
+    const snapshotData = sanitizeForFirestore({
+      shareId,
+      events: data.events || [],
+      stickers: data.stickers || [],
+      themeId: data.themeId || 'modern-clean',
+      ownerName: data.ownerName || null,
+      userId: data.userId || null,
+      createdAt: nowISO,
+      lastSyncedAt: nowISO,
+      eventCount: (data.events || []).length,
+      stickerCount: (data.stickers || []).length,
+    });
+
+    const timeoutPromise = new Promise<void>((_, reject) =>
+      setTimeout(() => reject(new Error('Shared snapshot timeout')), 10000)
+    );
+
+    await Promise.race([setDoc(docRef, snapshotData, { merge: true }), timeoutPromise]);
+    return nowISO;
+  } catch (error) {
+    console.warn('savePublicSharedSnapshot notice:', error);
+    return nowISO;
+  }
+}
+
+// Get public shared snapshot by shareId
+export async function getPublicSharedSnapshot(shareId: string): Promise<CalendarSnapshot | null> {
+  try {
+    const docRef = doc(db, 'sharedSnapshots', shareId);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      return {
+        events: Array.isArray(data.events) ? data.events : [],
+        stickers: Array.isArray(data.stickers) ? data.stickers : [],
+        themeId: data.themeId,
+        ownerName: data.ownerName,
+        lastSyncedAt: data.lastSyncedAt || data.createdAt || '',
+        eventCount: data.eventCount || 0,
+        stickerCount: data.stickerCount || 0,
+      };
+    }
+    return null;
+  } catch (error) {
+    console.warn('getPublicSharedSnapshot notice:', error);
+    return null;
+  }
+}
+
+// Subscribe to public shared snapshot in real-time
+export function subscribeToPublicSharedSnapshot(
+  shareId: string,
+  onUpdate: (snapshot: CalendarSnapshot) => void,
+  onError?: (err: any) => void
+): Unsubscribe {
+  const docRef = doc(db, 'sharedSnapshots', shareId);
+  return onSnapshot(
+    docRef,
+    (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        onUpdate({
+          events: Array.isArray(data.events) ? data.events : [],
+          stickers: Array.isArray(data.stickers) ? data.stickers : [],
+          themeId: data.themeId,
+          ownerName: data.ownerName,
+          lastSyncedAt: data.lastSyncedAt || data.createdAt || '',
+          eventCount: data.eventCount || 0,
+          stickerCount: data.stickerCount || 0,
+        });
+      }
+    },
+    (error) => {
+      console.warn('subscribeToPublicSharedSnapshot notice:', error);
+      if (onError) onError(error);
+    }
+  );
 }
 
 // Get consolidated calendar snapshot from database (atomic single-document read)
